@@ -17,7 +17,7 @@ def build(source_ref='main',filename='Banana_Grandmaster_27B.ipynb'):
 
 這不是 H3 專用改寫 9B 的直接對照；先測參數規模與故事指令表現。只生成文字，沒有影片／原曲下載。
 
-27B 需要較大的 GPU；選 GPU 執行階段。程式不自動切成 CPU 或更低精度。原始權重下載可能約數十 GB；4-bit 只在載入時量化。'''),
+預設 GPU 偏好為 G4。請在「執行階段 → 變更執行階段類型」確認選擇 G4；實際分配依 Colab 資源與帳戶而定。程式不自動切成 CPU 或更低精度。原始權重下載可能約數十 GB；4-bit 只在載入時量化。'''),
     cell('code','''# ① 下載獨立程式，使用自己的虛擬環境（沿用 Colab 的 PyTorch）
 import subprocess, sys
 from pathlib import Path
@@ -84,7 +84,7 @@ def stop_owned_process(_):
         print('試煉服務已停止；已存結果保留。Colab 的 GPU 配置仍需在執行階段選單自行結束。')
 stop_button.on_click(stop_owned_process)
 display(stop_button,stop_output)''')]
-    notebook={'cells':cells,'metadata':{'accelerator':'GPU','colab':{'name':'Banana_Grandmaster_27B.ipynb'},
+    notebook={'cells':cells,'metadata':{'accelerator':'GPU','colab':{'name':'Banana_Grandmaster_27B.ipynb','gpuType':'G4'},
                'kernelspec':{'display_name':'Python 3','name':'python3'}},'nbformat':4,'nbformat_minor':5}
     notebook['metadata']['colab']['name']=filename
     for item in notebook['cells']:
