@@ -3,7 +3,9 @@ import gc
 import hashlib
 import json
 import platform
+import sys
 import time
+import traceback
 import uuid
 from datetime import datetime,timezone
 from pathlib import Path
@@ -16,13 +18,22 @@ def atomic_json(path,value):
     temp=path.with_suffix('.tmp');temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),encoding='utf-8');temp.replace(path)
 
 
+def failure_record(error, model, stage):
+    trace = traceback.format_exc()
+    print(f'Bench failure at {stage}:\n{trace}', file=sys.stderr, flush=True)
+    return {'status':'error','model':model,'error_type':type(error).__name__,
+            'error':str(error),'stage':stage,'traceback':trace}
+
+
 class HFBackend:
     def run(self,label,system,task,images,settings):
+        self.stage='importing_runtime'
         import torch
         import transformers
         from huggingface_hub import HfApi
         from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig, set_seed
         if not torch.cuda.is_available():raise RuntimeError('請選擇 Colab GPU；此測試不會偷偷改用 CPU。')
+        self.stage='resolving_model_revision'
         model_id=MODELS[label];revision=settings.get('model_revision') or HfApi().model_info(model_id).sha
         model=processor=inputs=generated=None
         dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
@@ -33,25 +44,33 @@ class HFBackend:
         try:
             torch.cuda.empty_cache();torch.cuda.reset_peak_memory_stats();start=time.perf_counter()
             quant=BitsAndBytesConfig(load_in_4bit=True,bnb_4bit_quant_type='nf4',bnb_4bit_use_double_quant=True,bnb_4bit_compute_dtype=dtype)
-            processor=AutoProcessor.from_pretrained(model_id,revision=revision,trust_remote_code=False)
+            self.stage='loading_processor'
+            processor=AutoProcessor.from_pretrained(model_id,revision=revision,trust_remote_code=False,
+                                                     local_files_only=settings.get('local_files_only',False))
+            self.stage='loading_model'
             model=AutoModelForImageTextToText.from_pretrained(model_id,revision=revision,
-                quantization_config=quant,device_map={'':'cuda:0'},dtype=dtype,attn_implementation='sdpa',trust_remote_code=False)
+                quantization_config=quant,device_map={'':'cuda:0'},dtype=dtype,attn_implementation='sdpa',trust_remote_code=False,
+                local_files_only=settings.get('local_files_only',False))
             model.eval();torch.cuda.synchronize();load_seconds=time.perf_counter()-start
             load_peak=torch.cuda.max_memory_allocated()
+            self.stage='formatting_inputs'
             inputs=processor.apply_chat_template(messages,tokenize=True,return_dict=True,
                 return_tensors='pt',add_generation_prompt=True,enable_thinking=False).to('cuda:0')
             if inputs['input_ids'].shape[1]>16384:raise ValueError('測試輸入超過 16384 tokens，請縮短任務或減少圖片。')
             set_seed(settings['seed']);torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats();start=time.perf_counter()
+            self.stage='generating'
             with torch.inference_mode():
                 generated=model.generate(**inputs,max_new_tokens=settings['max_new_tokens'],do_sample=True,
                     temperature=.7,top_p=.8,top_k=20,repetition_penalty=1.0)
             torch.cuda.synchronize();elapsed=time.perf_counter()-start
             token_ids=generated[0,inputs['input_ids'].shape[1]:].tolist()
+            self.stage='decoding_output'
             output=processor.decode(token_ids,skip_special_tokens=True)
             eos=model.generation_config.eos_token_id;eos=eos if isinstance(eos,list) else [eos]
             return {'status':'ok','text':output,'model':model_id,'revision':revision,
                 'runtime':{'python':platform.python_version(),'torch':torch.__version__,'transformers':transformers.__version__,
-                           'gpu':torch.cuda.get_device_name(0),'quantization':'bitsandbytes NF4 double quant','compute_dtype':str(dtype),'attention':'sdpa','cpu_offload':False},
+                           'gpu':torch.cuda.get_device_name(0),'quantization':'bitsandbytes NF4 double quant','compute_dtype':str(dtype),'attention':'sdpa','cpu_offload':False,
+                           'local_files_only':settings.get('local_files_only',False)},
                 'metrics':{'load_seconds_including_download':load_seconds,'generation_seconds':elapsed,
                     'input_tokens':inputs['input_ids'].shape[1],'output_tokens':len(token_ids),
                     'output_tokens_per_second':len(token_ids)/elapsed if elapsed else None,
@@ -89,7 +108,7 @@ def compare(mode,task,images,settings,output_dir,backend=None,progress=None):
             result=backend.run(label,system,payload,images,settings)
             result['technical_check']=technical_check(mode,result['text'],task,len(images))
         except Exception as error:
-            result={'status':'error','model':MODELS[label],'error_type':type(error).__name__,'error':str(error)}
+            result=failure_record(error,MODELS[label],getattr(backend,'stage','backend.run'))
         report['models'][label]=result;atomic_json(path,report)
         if progress:progress(label+' completed: '+result['status'])
     return report,path

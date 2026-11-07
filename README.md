@@ -40,6 +40,13 @@ Git blob `4f4bd39499d05649f9befe57b5de1bfeda50913f`。驗證雜湊後，用 AST
 **目前只是可執行的文字對照工具。** 沒有真實 27B／H3／Seedance 生成結果，
 不能稱為接近 Seedance 的品質驗收，也不能當成完整 T8 插件的測試。
 
+若 Off 成功、On 失敗，先下載完整 JSON。更新後可展開「失敗重試」，上傳該 JSON，
+放回相同參考圖，按「只重試失敗稿」。使用原紀錄的指令／任務／Seed／模型 revision，
+成功稿保持原樣，另存重試紀錄。預設模型只讀本機快取；若確實缺檔，可取消該選項。
+新錯誤會記錄 loading_processor／loading_model／formatting_inputs／generating 等
+階段與完整 traceback。`JSONDecodeError` 本身不能證明是模型輸出格式錯誤；
+這組實驗不把生成文字解析成 JSON。
+
 ## 測什麼
 
 預設比較官方 `Qwen/Qwen3.5-9B` 與 `Qwen/Qwen3.5-27B`，兩邊皆以 Transformers＋bitsandbytes NF4 載入；關閉思考、temperature 0.7、top_p 0.8、top_k 20，逐顆載入及釋放，不同時保留兩顆。

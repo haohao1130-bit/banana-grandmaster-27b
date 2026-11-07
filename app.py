@@ -9,7 +9,7 @@ def build_app(output_dir):
     from PIL import Image,ImageOps
     from bench.tasks import preset
     from bench.runner import compare
-    from bench.director_experiment import compare_directors, director_preset
+    from bench.director_experiment import compare_directors, director_preset, retry_directors
     from bench.t8_adapter import DEFAULT_PATH
     def choose(mode,scope):return json.dumps(preset(mode,scope),ensure_ascii=False,indent=2)
     def run(mode,task,files,seed,tokens,order,progress=gr.Progress()):
@@ -35,6 +35,8 @@ def build_app(output_dir):
         report,path=compare_directors(task,pictures,{
             'model_label':model,'seed':int(seed),'max_new_tokens':int(tokens),'order':order},
             output_dir,DEFAULT_PATH,progress=lambda text:progress(.5,desc=text))
+        return director_result(report,path)
+    def director_result(report,path):
         texts=[report['arms'].get(arm,{}).get('text') or json.dumps(
             report['arms'].get(arm,report.get('setup_error',{})),ensure_ascii=False,indent=2)
             for arm in ('off','on')]
@@ -42,6 +44,16 @@ def build_app(output_dir):
         summary['arms']={arm:{k:v for k,v in value.items() if k!='text'}
                          for arm,value in report['arms'].items()}
         return *texts,summary,str(path)
+    def retry_director(report_file,files,offline,progress=gr.Progress()):
+        if not report_file:raise gr.Error('請先選擇先前下載的完整對照紀錄 JSON。')
+        pictures=[]
+        for file in files or []:
+            with Image.open(file) as image:
+                image=ImageOps.exif_transpose(image).convert('RGB')
+                image.thumbnail((768,768));pictures.append(image.copy())
+        report,path=retry_directors(report_file,pictures,output_dir,local_files_only=offline,
+                                   progress=lambda text:progress(.5,desc=text))
+        return director_result(report,path)
     with gr.Blocks(title='蕉宗 27B 大導演試煉場') as demo:
         gr.Markdown('# 🍌 蕉宗大導演試煉場\n官方 Qwen3.5 9B／27B，同任務、同 Seed、相同 NF4 量化，輪流載入。只測計畫與畫面描述，不生成影片。')
         gr.Markdown('這不是正式版 H3 專用改寫 9B 的直接對照。技術格式通過也不等於故事正確；請人工比較角色、因果、段落發展與結尾。')
@@ -70,6 +82,15 @@ def build_app(output_dir):
             director_button.click(run_director,[director_brief,cues,director_images,model,director_seed,
                 director_tokens,director_order],[off_text,on_text,director_stats,director_download],
                 concurrency_limit=1,concurrency_id='bench_gpu')
+            with gr.Accordion('失敗重試：保留成功稿，只補失敗的一版',open=False):
+                retry_file=gr.File(file_types=['.json'],label='先前下載的完整對照紀錄 JSON')
+                offline=gr.Checkbox(value=True,label='模型只讀已下載快取（缺檔時會報錯，可取消後重試）')
+                gr.Markdown('沿用紀錄中的故事、指令、Seed 和模型 revision；上方圖片需與原測試相同。'
+                            '成功稿不重跑，另存一份重試紀錄。')
+                retry_button=gr.Button('只重試失敗稿')
+                retry_button.click(retry_director,[retry_file,director_images,offline],
+                    [off_text,on_text,director_stats,director_download],
+                    concurrency_limit=1,concurrency_id='bench_gpu')
         gr.Markdown('## 原有實驗：通用 9B／27B 模型比較（較早 Banana 指令）')
         with gr.Row():
             mode=gr.Dropdown(['planner','writer'],value='planner',label='全曲規劃／單段畫面')

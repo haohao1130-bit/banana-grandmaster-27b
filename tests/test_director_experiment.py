@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from bench.director_experiment import compare_directors, director_preset, DIRECTOR_SYSTEM
+from bench.director_experiment import compare_directors, director_preset, retry_directors, DIRECTOR_SYSTEM
 from bench.t8_adapter import load_method
 
 
@@ -80,6 +80,53 @@ class DirectorExperimentTests(unittest.TestCase):
             if cell['cell_type']=='code':
                 compile(''.join(cell['source']),'colab-experiment','exec')
                 self.assertEqual(cell['outputs'],[])
+
+    def failed_pair(self,tmp):
+        report,path=self.execute(tmp,RecordingBackend(fail_call=2))
+        report['settings']['model_revision']='fixed-test-revision'
+        path.write_text(json.dumps(report))
+        return report,path
+
+    def test_retry_runs_only_failed_arm_with_saved_prompt_and_model_revision(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            original,path=self.failed_pair(tmp);before=path.read_bytes();backend=RecordingBackend()
+            report,new_path=retry_directors(path,[],tmp,backend=backend)
+            self.assertEqual(len(backend.calls),1)
+            call=backend.calls[0]
+            self.assertEqual(call[1],original['systems']['on'])
+            self.assertEqual(call[2],original['payload'])
+            self.assertEqual(call[4]['model_revision'],'fixed-test-revision')
+            self.assertTrue(call[4]['local_files_only'])
+            self.assertEqual(report['arms']['off'],original['arms']['off'])
+            self.assertEqual(path.read_bytes(),before)
+            self.assertNotEqual(path,new_path)
+            self.assertEqual(report['previous_attempts']['on'][0],original['arms']['on'])
+
+    def test_retry_failure_retains_success_and_stage_traceback(self):
+        class JsonFailure(RecordingBackend):
+            stage='loading_processor'
+            def run(self,*args):
+                json.loads('')
+        with tempfile.TemporaryDirectory() as tmp:
+            original,path=self.failed_pair(tmp)
+            report,_=retry_directors(path,[],tmp,backend=JsonFailure())
+            self.assertEqual(report['arms']['off'],original['arms']['off'])
+            error=report['arms']['on']
+            self.assertEqual(error['error_type'],'JSONDecodeError')
+            self.assertEqual(error['stage'],'loading_processor')
+            self.assertIn('json.loads',error['traceback'])
+
+    def test_retry_refuses_changed_input_or_missing_revision_before_call(self):
+        for change in ('system','image','revision'):
+            with self.subTest(change=change),tempfile.TemporaryDirectory() as tmp:
+                report,path=self.failed_pair(tmp);backend=RecordingBackend()
+                if change=='system':report['systems']['on']='different'
+                elif change=='image':report['image_sha256']=['different']
+                else:report['settings'].pop('model_revision')
+                path.write_text(json.dumps(report))
+                with self.assertRaises(ValueError):
+                    retry_directors(path,[],tmp,backend=backend)
+                self.assertEqual(backend.calls,[])
 
 
 if __name__=='__main__':unittest.main()

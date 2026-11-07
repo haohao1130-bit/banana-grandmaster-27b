@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from bench.runner import HFBackend, MODELS, atomic_json
+from bench.runner import HFBackend, MODELS, atomic_json, failure_record
 from bench.t8_adapter import load_method
 
 
@@ -132,11 +132,62 @@ def compare_directors(task, images, settings, output_dir, method_path, backend=N
                 result = backend.run(model_label, systems[arm], payload,
                                      images, copy.deepcopy(sampling))
             except Exception as error:
-                result = {'status': 'error', 'model': MODELS[model_label],
-                          'error_type': type(error).__name__, 'error': str(error)}
+                result = failure_record(error,MODELS[model_label],getattr(backend,'stage','backend.run'))
             report['arms'][arm] = result
             atomic_json(path, report)
     except Exception as error:
-        report['setup_error'] = {'type': type(error).__name__, 'message': str(error)}
+        report['setup_error'] = failure_record(error,MODELS[model_label],'resolving_model_revision')
         atomic_json(path, report)
     return report, path
+
+
+def retry_directors(report_path, images, output_dir, *, local_files_only=True,
+                    backend=None, progress=None):
+    """Retry only failed/missing arms in a new report, preserving successful text."""
+    data=Path(report_path).read_bytes()
+    try:
+        saved=json.loads(data)
+    except (ValueError,UnicodeDecodeError) as error:
+        raise ValueError('請選擇完整對照紀錄 JSON；檔案無法解析。') from error
+    if not isinstance(saved,dict) or saved.get('experiment')!='same_model_t8_storyboard_off_on_v1':
+        raise ValueError('需要完整 Off／On 對照紀錄，不是單一錯誤卡片。')
+    if not isinstance(saved.get('arms'),dict) or not isinstance(saved.get('systems'),dict):
+        raise ValueError('對照紀錄缺少原始輸入。')
+    for arm in ('off','on'):
+        text=saved['systems'].get(arm)
+        if not isinstance(text,str) or hashlib.sha256(text.encode()).hexdigest()!=saved.get('system_sha256',{}).get(arm):
+            raise ValueError('原始導演指令校驗失敗，不重建或替換原指令。')
+    if json.loads(saved['payload'])!=saved['task']:
+        raise ValueError('原始任務校驗失敗。')
+    if ([hashlib.sha256(p.tobytes()).hexdigest() for p in images]!=saved.get('image_sha256') or
+        [list(p.size) for p in images]!=saved.get('image_sizes') or
+        [p.mode for p in images]!=saved.get('image_modes')):
+        raise ValueError('參考圖與原測試不同；請放回相同圖片及順序。')
+    sampling=copy.deepcopy(saved['settings'])
+    label=sampling.get('model_label','27B')
+    if label not in MODELS or not sampling.get('model_revision'):
+        raise ValueError('原紀錄缺少固定模型 revision，不能假裝是同模型續試。')
+    pending=[arm for arm in saved['order'] if saved['arms'].get(arm,{}).get('status')!='ok']
+    if not pending:
+        raise ValueError('兩版都已成功，不需要重試。')
+    report=copy.deepcopy(saved)
+    report['retry_of']={'id':saved['id'],'report_sha256':hashlib.sha256(data).hexdigest()}
+    report['id']=time.strftime('%Y%m%d-%H%M%S')+'-director-retry-'+uuid.uuid4().hex[:8]
+    report['created_at_utc']=datetime.now(timezone.utc).isoformat()
+    report.pop('setup_error',None)
+    sampling['local_files_only']=bool(local_files_only)
+    report['settings']=sampling
+    report['retry_arms']=pending
+    path=Path(output_dir)/(report['id']+'.json')
+    atomic_json(path,report)
+    backend=backend or HFBackend()
+    for arm in pending:
+        if progress:progress(label+' · retry T8 '+arm)
+        report.setdefault('previous_attempts',{}).setdefault(arm,[]).append(copy.deepcopy(report['arms'].get(arm)))
+        try:
+            result=backend.run(label,report['systems'][arm],report['payload'],images,copy.deepcopy(sampling))
+        except Exception as error:
+            result=failure_record(error,MODELS[label],getattr(backend,'stage','backend.run'))
+        report['arms'][arm]=result
+        atomic_json(path,report)
+    return report,path
