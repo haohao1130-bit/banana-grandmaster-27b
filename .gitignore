@@ -6,3 +6,5 @@ runs/
 cache/
 *.log
 .env
+runtime/
+local_data/

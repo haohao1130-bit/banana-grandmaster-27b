@@ -1,0 +1,6 @@
+transformers @ git+https://github.com/huggingface/transformers.git@f262c71703eb138381d65ced86b3aaa496be0196
+accelerate>=1.4
+bitsandbytes>=0.48
+gradio>=5,<7
+huggingface_hub>=0.30
+Pillow>=10

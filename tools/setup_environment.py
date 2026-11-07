@@ -61,11 +61,8 @@ def prepare_environment(root=ROOT, base_python=sys.executable, runner=run_logged
     runner([str(python), '-m', 'pip', '--version'], log)
     runner([str(python), '-m', 'pip', 'install', '-r', str(root/'requirements.txt')], log)
     runner([str(python), '-c',
-            'import sys,torch,transformers,gradio,accelerate,bitsandbytes;'
-            'from transformers import AutoProcessor,AutoModelForImageTextToText,BitsAndBytesConfig;'
-            'print("Python:",sys.version);print("Torch:",torch.__version__,"CUDA:",torch.version.cuda);'
-            'print("GPU available:",torch.cuda.is_available());'
-            'print("Transformers:",transformers.__version__,"Gradio:",gradio.__version__)'], log)
+            'import sys,gradio,huggingface_hub,PIL;'
+            'print("Python:",sys.version,"Gradio:",gradio.__version__)'], log)
     return python
 
 
