@@ -1,9 +1,13 @@
 """Inspect/repair only a pinned model's tokenizer.json; never remove weights."""
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 import shutil
 import uuid
+
+SHARED_LINK=re.compile(r'\.\./\.\./blobs/([0-9a-f]{2})/([0-9a-f]{64})')
 
 
 def inspect_tokenizer(path):
@@ -17,6 +21,8 @@ def inspect_tokenizer(path):
             info['state']='empty'
         elif data.startswith(b'version https://git-lfs.github.com/spec/v1'):
             info['state']='git_lfs_pointer'
+        elif len(data)==79 and SHARED_LINK.fullmatch(data.decode('ascii',errors='replace')):
+            info.update(state='shared_blob_link_text',relative_target=data.decode('ascii'))
         else:
             try:
                 value=json.loads(data.decode('utf-8'))
@@ -27,6 +33,40 @@ def inspect_tokenizer(path):
     except OSError as error:
         info.update(state='unreadable',error=str(error))
     return info
+
+
+def _shared_target(cached,before):
+    """Resolve only this cache's known shared layout, with content-address check."""
+    if before['state']!='shared_blob_link_text':return None
+    broken=Path(cached).resolve()
+    if broken.parent.name!='blobs' or not broken.parent.parent.name.startswith('models--'):
+        return None
+    match=SHARED_LINK.fullmatch(before['relative_target'])
+    if match[1]!=match[2][:2]:return None
+    store=(broken.parents[2]/'blobs').resolve()
+    target=(broken.parent/before['relative_target']).resolve()
+    if not target.is_relative_to(store):return None
+    candidate=inspect_tokenizer(target)
+    # The per-repo 64-hex LFS etag is the SHA-256 of the actual file, while
+    # the shared store uses a different Xet identifier. Do not confuse them.
+    if (re.fullmatch(r'[0-9a-f]{64}',broken.name) and
+        candidate['state']=='valid_json_structure' and candidate['sha256']==broken.name):
+        return target,candidate
+    return None
+
+
+def _materialize(source,destination,expected_sha):
+    """Replace the snapshot entry, not its link target, after verifying a copy."""
+    destination=Path(destination)
+    temp=destination.with_name(destination.name+'.repair-'+uuid.uuid4().hex)
+    try:
+        shutil.copyfile(source,temp)
+        checked=inspect_tokenizer(temp)
+        if checked['state']!='valid_json_structure' or checked['sha256']!=expected_sha:
+            raise RuntimeError('共享 tokenizer 複製後校驗失敗；保留原快取。')
+        os.replace(temp,destination)
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 def failure_details(error):
@@ -79,14 +119,25 @@ def repair_from_report(report_path, output_dir, downloader=None):
                 backup.parent.mkdir(parents=True,exist_ok=True)
                 shutil.copy2(cached,backup)
                 result['backup']=str(backup)
-            stage='downloading_tokenizer_only'
-            downloaded=downloader(repo_id=MODELS[label],filename='tokenizer.json',
-                                  revision=revision,force_download=True)
+            stage='checking_shared_tokenizer_payload'
+            shared=_shared_target(cached,before) if cached else None
+            if shared:
+                source,source_info=shared
+                stage='materializing_shared_tokenizer'
+                _materialize(source,cached,source_info['sha256'])
+                downloaded=cached
+                result.update(downloaded=False,recovery_method='materialized_existing_shared_blob',
+                              recovery_source=source_info)
+            else:
+                stage='downloading_tokenizer_only'
+                downloaded=downloader(repo_id=MODELS[label],filename='tokenizer.json',
+                                      revision=revision,force_download=True)
+                result.update(downloaded=True,recovery_method='downloaded_pinned_tokenizer')
             stage='validating_replacement'
             result['after']=inspect_tokenizer(downloaded)
             if result['after']['state']!='valid_json_structure':
                 raise RuntimeError('重新下載的 tokenizer.json 仍不是有效的 tokenizer JSON；停止重試。')
-            result.update(status='repaired',downloaded=True)
+            result['status']='repaired'
     except Exception as error:
         result['failure']=failure_record(error,MODELS[label],stage)
         result['status']='error'

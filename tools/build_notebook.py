@@ -51,6 +51,8 @@ else:
     DATA=ROOT/'local_data'
 DATA.mkdir(parents=True,exist_ok=True)
 env['HF_HOME']=str(DATA/'cache')
+env['HF_HUB_DISABLE_SHARED_BLOBS']='1'
+env['HF_HUB_DISABLE_SYMLINKS']='1'
 OUTPUT=DATA/'runs'
 print('結果位置：',OUTPUT)
 print('兩顆模型都會在按下測試後才下載／載入。')'''),

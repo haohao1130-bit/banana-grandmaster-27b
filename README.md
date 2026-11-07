@@ -56,6 +56,24 @@ JSON 狀態與磁碟餘量，區分空檔、Git LFS 指標、無效 JSON 或目�
 這不能單憑 traceback 判定是網路、Drive 同步、磁碟不足或套件問題；修復紀錄
 與後續真實 processor 載入結果才是判準。
 
+### 已定位的 79-byte tokenizer 故障
+
+一次真實紀錄中，Off／On 讀到同一個 79-byte 檔。其 SHA-256 完全吻合
+`../../blobs/8f/8f06040c24d0d6efc263cf398806debbf20d732031ba128349d086f6a7b8bab2`
+這段路徑文字；對應的共享資料檔在 Drive 清單仍有 12,807,982 bytes。
+配合 huggingface_hub 2.4 的共享快取原碼，可以定位為載入器讀到連結文字，
+而非 tokenizer 本體；尚未直接重現是哪一步把連結保存／還原成普通文字。
+
+新版在啟動服務、匯入 Hub 前停用共享 blob 與符號連結，筆記本也傳入相同設定。
+這些設定不會自動轉換已存在的快取。修復按鈕會先辨識這種路徑文字，僅當共享
+目標位於同一 Hub cache、JSON 結構有效、內容 SHA-256 等於原模型 blob 的 LFS
+etag 時，把資料複製成該 snapshot 的普通 tokenizer.json。原文字、共享本體及
+模型權重保留；無可驗證本體才下載 tokenizer 小檔。不清除整個 Drive 快取。
+
+此修復已用本機檔案重現 79-byte 連結文字、snapshot symlink 及共享 JSON 本體，
+驗證可不下載而還原、來源與備份保持原樣、雜湊不符不採用。尚未在使用者 G4
+實際完成 processor 重新載入或推論。
+
 ## 測什麼
 
 預設比較官方 `Qwen/Qwen3.5-9B` 與 `Qwen/Qwen3.5-27B`，兩邊皆以 Transformers＋bitsandbytes NF4 載入；關閉思考、temperature 0.7、top_p 0.8、top_k 20，逐顆載入及釋放，不同時保留兩顆。

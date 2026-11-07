@@ -34,6 +34,7 @@ class HFBackend:
         self.stage='importing_runtime'
         import torch
         import transformers
+        from huggingface_hub import constants as hub_constants
         from huggingface_hub import HfApi
         from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig, set_seed
         if not torch.cuda.is_available():raise RuntimeError('請選擇 Colab GPU；此測試不會偷偷改用 CPU。')
@@ -74,7 +75,9 @@ class HFBackend:
             return {'status':'ok','text':output,'model':model_id,'revision':revision,
                 'runtime':{'python':platform.python_version(),'torch':torch.__version__,'transformers':transformers.__version__,
                            'gpu':torch.cuda.get_device_name(0),'quantization':'bitsandbytes NF4 double quant','compute_dtype':str(dtype),'attention':'sdpa','cpu_offload':False,
-                           'local_files_only':settings.get('local_files_only',False)},
+                           'local_files_only':settings.get('local_files_only',False),
+                           'hub_shared_blobs_disabled':getattr(hub_constants,'HF_HUB_DISABLE_SHARED_BLOBS',None),
+                           'hub_symlinks_disabled':getattr(hub_constants,'HF_HUB_DISABLE_SYMLINKS',None)},
                 'metrics':{'load_seconds_including_download':load_seconds,'generation_seconds':elapsed,
                     'input_tokens':inputs['input_ids'].shape[1],'output_tokens':len(token_ids),
                     'output_tokens_per_second':len(token_ids)/elapsed if elapsed else None,

@@ -1,10 +1,15 @@
 """Local UI; does not load or generate models until the user starts a pair."""
 import argparse
 import json
+import os
 from pathlib import Path
 
 
 def build_app(output_dir):
+    # Set before Gradio can import huggingface_hub and freeze its constants.
+    # Drive can persist shared-cache symlink targets as plain path text.
+    os.environ['HF_HUB_DISABLE_SHARED_BLOBS']='1'
+    os.environ['HF_HUB_DISABLE_SYMLINKS']='1'
     import gradio as gr
     from PIL import Image,ImageOps
     from bench.tasks import preset
@@ -96,7 +101,8 @@ def build_app(output_dir):
                 repair_status=gr.JSON(label='Tokenizer 檢查／修復結果')
                 repair_download=gr.File(label='Tokenizer 修復紀錄')
                 gr.Markdown('僅供 loading_processor 的 JSONDecodeError：先檢查快取，'
-                            '只有檔案無效或缺少才下載同版本 tokenizer.json；壞檔先備份，權重不重抓。'
+                            '若讀到共享連結文字，優先校驗並還原現有 tokenizer 本體；'
+                            '無可用本體才下載同版本 tokenizer.json。壞檔先備份，權重不重抓。'
                             '修復成功後，再按下方只重試失敗稿。')
                 repair_button.click(repair_tokenizer,[retry_file],[repair_status,repair_download],
                     concurrency_limit=1,concurrency_id='bench_gpu')

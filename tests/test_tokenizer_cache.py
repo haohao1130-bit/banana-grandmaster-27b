@@ -1,4 +1,5 @@
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -68,6 +69,48 @@ class TokenizerCacheTests(unittest.TestCase):
             self.assertEqual(result['failure']['stage'],'downloading_tokenizer_only')
             self.assertEqual(Path(result['backup']).read_bytes(),b'broken')
             self.assertEqual(cached.read_bytes(),b'broken')
+
+    def test_drive_shared_link_text_recovers_existing_payload_without_download(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);hub=root/'hub';repo=hub/'models--Qwen--Qwen3.5-27B'
+            etag=hashlib.sha256(VALID).hexdigest();xet='8f'+'1'*62
+            target=hub/'blobs'/'8f'/xet;target.parent.mkdir(parents=True);target.write_bytes(VALID)
+            broken=repo/'blobs'/etag;broken.parent.mkdir(parents=True)
+            pointer='../../blobs/8f/'+xet;broken.write_text(pointer)
+            snapshot=repo/'snapshots'/'pinned-test-revision'/'tokenizer.json'
+            snapshot.parent.mkdir(parents=True);snapshot.symlink_to('../../blobs/'+etag)
+            self.assertEqual(inspect_tokenizer(snapshot)['size_bytes'],79)
+            self.assertEqual(inspect_tokenizer(snapshot)['state'],'shared_blob_link_text')
+            calls=[]
+            def download(**kwargs):
+                calls.append(kwargs)
+                if kwargs.get('force_download'):self.fail('Valid existing payload must not be redownloaded')
+                return str(snapshot)
+            result,_=repair_from_report(self.report(root),root/'runs',download)
+            self.assertEqual(result['status'],'repaired')
+            self.assertEqual(result['recovery_method'],'materialized_existing_shared_blob')
+            self.assertFalse(result['downloaded'])
+            self.assertFalse(snapshot.is_symlink())
+            self.assertEqual(snapshot.read_bytes(),VALID)
+            self.assertEqual(target.read_bytes(),VALID)
+            self.assertEqual(broken.read_text(),pointer)
+            self.assertEqual(Path(result['backup']).read_bytes(),pointer.encode())
+            self.assertEqual(len(calls),1)
+
+    def test_shared_payload_hash_mismatch_is_not_silently_materialized(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp);hub=root/'hub';repo=hub/'models--Qwen--Qwen3.5-27B'
+            target=hub/'blobs'/'8f'/('8f'+'1'*62);target.parent.mkdir(parents=True);target.write_bytes(VALID)
+            broken=repo/'blobs'/('a'*64);broken.parent.mkdir(parents=True)
+            broken.write_text('../../blobs/8f/'+target.name)
+            calls=[]
+            def download(**kwargs):
+                calls.append(kwargs)
+                if kwargs.get('force_download'):broken.write_bytes(VALID)
+                return str(broken)
+            result,_=repair_from_report(self.report(root),root/'runs',download)
+            self.assertEqual(result['recovery_method'],'downloaded_pinned_tokenizer')
+            self.assertEqual(len(calls),2)
 
 
 if __name__=='__main__':unittest.main()
