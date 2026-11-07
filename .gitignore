@@ -1,7 +1,10 @@
 .venv/
+.venv-before-setup-*/
 __pycache__/
 *.pyc
 runs/
 cache/
 *.log
 .env
+runtime/
+local_data/
