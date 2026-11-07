@@ -23,18 +23,20 @@ import subprocess, sys
 from pathlib import Path
 ROOT=Path('/content/banana-grandmaster-27b')
 SOURCE_REF = 'BENCH_SOURCE_REF' # @param {type:"string"}
+if 'bench_process' in globals() and bench_process.poll() is None:
+    raise RuntimeError('試煉服務仍在執行，請先按停止按鈕，再更新或安裝。')
 if not ROOT.exists():
     subprocess.run(['git','clone','--branch',SOURCE_REF,'https://github.com/haohao1130-bit/banana-grandmaster-27b.git',str(ROOT)],check=True)
 else:
     actual_ref=subprocess.check_output(['git','-C',str(ROOT),'branch','--show-current'],text=True).strip()
     if actual_ref!=SOURCE_REF:
         raise RuntimeError('目前 checkout 是 '+actual_ref+'，本筆記本要求 '+SOURCE_REF+'。請換乾淨執行階段，或停止服務後手動切換；不自動覆寫舊程式。')
-    print('沿用目前分支；需要新版時先停止服務再更新。')
+    if subprocess.run(['git','-C',str(ROOT),'diff','--quiet']).returncode or subprocess.run(['git','-C',str(ROOT),'diff','--cached','--quiet']).returncode:
+        raise RuntimeError('程式目錄有本地修改，請先保留修改；不自動覆寫。')
+    subprocess.run(['git','-C',str(ROOT),'pull','--ff-only','origin',SOURCE_REF],check=True)
 print('目前程式提交：',subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip())
 PY=ROOT/'.venv/bin/python'
-if not PY.exists():
-    subprocess.run([sys.executable,'-m','venv','--system-site-packages',str(ROOT/'.venv')],check=True)
-subprocess.run([str(PY),'-m','pip','install','-q','-r',str(ROOT/'requirements.txt')],check=True)
+subprocess.run([sys.executable,str(ROOT/'tools/setup_environment.py')],check=True)
 subprocess.run([str(PY),str(ROOT/'tools/fetch_t8.py')],check=True)
 print('程式、套件與固定 T8 分鏡來源就位。尚未下載權重或執行模型。')'''),
     cell('code','''# ② 選擇是否保存測試結果與模型快取到 Drive

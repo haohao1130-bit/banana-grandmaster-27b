@@ -61,6 +61,13 @@ Colab 依序執行三格：獨立安裝 → 選保存位置 → 啟動內嵌介�
 兩份筆記本的預設 GPU 偏好皆為 **G4**；請在「執行階段 → 變更執行階段類型」確認。
 實際分配依 Colab 資源與帳戶而定；此設定不保證顯存足夠，也不會自動切換既有執行階段。
 
+第一格會在服務已停止、分支正確且沒有本地修改時，以 `git pull --ff-only` 更新。
+安裝採 `venv --without-pip --system-site-packages`，再由 notebook 的 pip
+將 pip 安裝到獨立環境，避免 Colab 缺少 ensurepip 或失敗留下半成品的問題。
+不同 Python 版本或無法執行的舊環境會保留為 `.venv-before-setup-*`，不刪除。
+每個安裝步驟都顯示完整輸出，並保存 `setup.log`；失敗時以第一個具體 ERROR
+判斷，不自動認定 Python 3.13 不支援。此 log 不會提交到 GitHub。
+
 使用獨立虛擬環境，沿用 Colab 的 GPU PyTorch；不修改 ComfyUI。27B 需要較大的顯存，實際需求取決於圖片與上下文。OOM 會記錄錯誤，不偷偷 CPU offload 或換模型。未做實際 GPU 執行驗收，不能保證每種 Colab 卡都能跑。
 
 **NF4 是載入時量化。** 仍需先下載官方完整原始權重；兩顆合計可能需要數十 GB 以上磁碟。第一次的載入時間含下載與量化，不拿它當純推論速度。
