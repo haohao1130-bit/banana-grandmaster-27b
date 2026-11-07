@@ -23,7 +23,7 @@ class HFBackend:
         from huggingface_hub import HfApi
         from transformers import AutoProcessor, AutoModelForImageTextToText, BitsAndBytesConfig, set_seed
         if not torch.cuda.is_available():raise RuntimeError('請選擇 Colab GPU；此測試不會偷偷改用 CPU。')
-        model_id=MODELS[label];revision=HfApi().model_info(model_id).sha
+        model_id=MODELS[label];revision=settings.get('model_revision') or HfApi().model_info(model_id).sha
         model=processor=inputs=generated=None
         dtype=torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         content=[{'type':'text','text':task}]

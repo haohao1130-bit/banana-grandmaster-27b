@@ -11,7 +11,7 @@ def cell(kind,text):
     return result
 
 
-def build():
+def build(source_ref='main',filename='Banana_Grandmaster_27B.ipynb'):
     cells=[cell('markdown','''# 🍌 蕉宗 27B 大導演試煉場
 獨立測試，不修改正式 Banana MV。官方 Qwen3.5 9B 與 27B 使用相同任務、NF4 量化、Seed 和取樣參數，逐顆載入。
 
@@ -22,15 +22,21 @@ def build():
 import subprocess, sys
 from pathlib import Path
 ROOT=Path('/content/banana-grandmaster-27b')
+SOURCE_REF = 'BENCH_SOURCE_REF' # @param {type:"string"}
 if not ROOT.exists():
-    subprocess.run(['git','clone','https://github.com/haohao1130-bit/banana-grandmaster-27b.git',str(ROOT)],check=True)
+    subprocess.run(['git','clone','--branch',SOURCE_REF,'https://github.com/haohao1130-bit/banana-grandmaster-27b.git',str(ROOT)],check=True)
 else:
-    print('沿用目前程式；需要新版時先停止服務再更新。')
+    actual_ref=subprocess.check_output(['git','-C',str(ROOT),'branch','--show-current'],text=True).strip()
+    if actual_ref!=SOURCE_REF:
+        raise RuntimeError('目前 checkout 是 '+actual_ref+'，本筆記本要求 '+SOURCE_REF+'。請換乾淨執行階段，或停止服務後手動切換；不自動覆寫舊程式。')
+    print('沿用目前分支；需要新版時先停止服務再更新。')
+print('目前程式提交：',subprocess.check_output(['git','-C',str(ROOT),'rev-parse','HEAD'],text=True).strip())
 PY=ROOT/'.venv/bin/python'
 if not PY.exists():
     subprocess.run([sys.executable,'-m','venv','--system-site-packages',str(ROOT/'.venv')],check=True)
 subprocess.run([str(PY),'-m','pip','install','-q','-r',str(ROOT/'requirements.txt')],check=True)
-print('程式與套件就位。尚未下載權重或執行模型。')'''),
+subprocess.run([str(PY),str(ROOT/'tools/fetch_t8.py')],check=True)
+print('程式、套件與固定 T8 分鏡來源就位。尚未下載權重或執行模型。')'''),
     cell('code','''# ② 選擇是否保存測試結果與模型快取到 Drive
 SAVE_TO_DRIVE = True # @param {type:"boolean"}
 import os
@@ -80,7 +86,12 @@ stop_button.on_click(stop_owned_process)
 display(stop_button,stop_output)''')]
     notebook={'cells':cells,'metadata':{'accelerator':'GPU','colab':{'name':'Banana_Grandmaster_27B.ipynb'},
                'kernelspec':{'display_name':'Python 3','name':'python3'}},'nbformat':4,'nbformat_minor':5}
-    (ROOT/'Banana_Grandmaster_27B.ipynb').write_text(json.dumps(notebook,ensure_ascii=False,indent=2)+'\n')
+    notebook['metadata']['colab']['name']=filename
+    for item in notebook['cells']:
+        item['source']=[line.replace('BENCH_SOURCE_REF',source_ref) for line in item['source']]
+    (ROOT/filename).write_text(json.dumps(notebook,ensure_ascii=False,indent=2)+'\n')
 
 
-if __name__=='__main__':build()
+if __name__=='__main__':
+    build()
+    build('experiment/t8-director-ab','Banana_T8_Director_AB.ipynb')

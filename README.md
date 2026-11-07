@@ -4,6 +4,42 @@
 
 獨立的 27B／9B 導演對照試煉場。**不修改、不啟動正式 Banana MV，不生成影片。**
 
+## 新實驗：同模型的 T8 分鏡 Off／On
+
+[在 Colab 開啟 T8 實驗分支](https://colab.research.google.com/github/haohao1130-bit/banana-grandmaster-27b/blob/experiment/t8-director-ab/Banana_T8_Director_AB.ipynb)。
+此筆記本會 clone `experiment/t8-director-ab`；若已有其他分支的 checkout 會停止提示，
+避免畫面開實驗筆記本卻跑到 main 的舊程式。
+
+介面上方新增獨立實驗：給故事主軸、可選參考圖與聲部時間，讓同一顆通用
+Qwen3.5-27B 拍兩版。Off 使用精簡導演指令，On 只在同樣指令後加入 T8
+實驗分鏡方法；故事、圖片、輸出格式、取樣與模型 revision 相同。可選 9B
+或反轉 Off／On 順序再跑。兩個實驗共用 GPU 佇列，避免兩個按鈕同時載入模型。
+
+這組實驗不使用下方舊版 Banana planner/writer 的 system；舊對照保留。
+預設案例是新寫的 15 秒雙線喜劇，聲部時間是測試用人工設定，**沒有分析原曲**。
+上傳圖片時，在主軸明寫 Picture 1、Picture 2 分別代表誰；非演唱角色可以用
+動作、插鏡與反應參與畫面。沒有固定鏡數或最低鏡長。
+
+Colab 第一格會下載一份固定 T8 來源到忽略的 `cache/t8/`。本機先執行：
+
+```bash
+python tools/fetch_t8.py
+```
+
+來源固定為 [T8 storyboard_director.py](https://github.com/T8mars/comfyui-minimax-h3-prompt-enhancer-T8/blob/25a8caafac8d4d77f5d0e11b6c01f1491903d5f5/storyboard_director.py)，
+Git blob `4f4bd39499d05649f9befe57b5de1bfeda50913f`。驗證雜湊後，用 AST
+只讀取 H3／AUTO 分支的字串，不 import、eval 或 exec 上游程式；不安裝 ComfyUI
+或其他 T8 功能，也不把上游原文收入本倉庫。來源缺少／雜湊不符就停止，不偷偷
+退回無 T8 的實驗。詳見 [實驗方法與驗收](docs/director-experiment.md)。
+
+每版原始輸出與失敗立即存檔；JSON 包含完整 system、任務、T8／system 雜湊、
+模型 revision、取樣、圖片像素雜湊與尺寸、耗時及顯存紀錄。兩版會各自載入及
+釋放同一模型，因此一次比較有兩次載入成本；本次不為了省載入而改既有 backend
+生命週期。結果與素材不會自動上傳 GitHub。
+
+**目前只是可執行的文字對照工具。** 沒有真實 27B／H3／Seedance 生成結果，
+不能稱為接近 Seedance 的品質驗收，也不能當成完整 T8 插件的測試。
+
 ## 測什麼
 
 預設比較官方 `Qwen/Qwen3.5-9B` 與 `Qwen/Qwen3.5-27B`，兩邊皆以 Transformers＋bitsandbytes NF4 載入；關閉思考、temperature 0.7、top_p 0.8、top_k 20，逐顆載入及釋放，不同時保留兩顆。
