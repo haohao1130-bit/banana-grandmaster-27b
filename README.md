@@ -47,6 +47,15 @@ Git blob `4f4bd39499d05649f9befe57b5de1bfeda50913f`。驗證雜湊後，用 AST
 階段與完整 traceback。`JSONDecodeError` 本身不能證明是模型輸出格式錯誤；
 這組實驗不把生成文字解析成 JSON。
 
+若 traceback 指到 Transformers 的 `convert_to_native_format` →
+`json.load(tokenizer_handle)`，表示當時讀到的 tokenizer 檔案內容無法解析，
+仍未進入導演推論。新版錯誤會從該 frame 取得真實路徑，記錄大小、雜湊、
+JSON 狀態與磁碟餘量，區分空檔、Git LFS 指標、無效 JSON 或目前已恢復正常。
+可先按「檢查／修復 tokenizer.json」：僅檢查同 revision 的該檔，無效／缺少
+才下載，壞檔先備份；有效檔不重抓。模型權重與原始對照報告不修改。
+這不能單憑 traceback 判定是網路、Drive 同步、磁碟不足或套件問題；修復紀錄
+與後續真實 processor 載入結果才是判準。
+
 ## 測什麼
 
 預設比較官方 `Qwen/Qwen3.5-9B` 與 `Qwen/Qwen3.5-27B`，兩邊皆以 Transformers＋bitsandbytes NF4 載入；關閉思考、temperature 0.7、top_p 0.8、top_k 20，逐顆載入及釋放，不同時保留兩顆。

@@ -21,8 +21,12 @@ def atomic_json(path,value):
 def failure_record(error, model, stage):
     trace = traceback.format_exc()
     print(f'Bench failure at {stage}:\n{trace}', file=sys.stderr, flush=True)
-    return {'status':'error','model':model,'error_type':type(error).__name__,
+    result={'status':'error','model':model,'error_type':type(error).__name__,
             'error':str(error),'stage':stage,'traceback':trace}
+    if isinstance(error,json.JSONDecodeError) and stage=='loading_processor':
+        from bench.tokenizer_cache import failure_details
+        result['details']=failure_details(error)
+    return result
 
 
 class HFBackend:

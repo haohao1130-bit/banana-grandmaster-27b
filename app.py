@@ -11,6 +11,7 @@ def build_app(output_dir):
     from bench.runner import compare
     from bench.director_experiment import compare_directors, director_preset, retry_directors
     from bench.t8_adapter import DEFAULT_PATH
+    from bench.tokenizer_cache import repair_from_report
     def choose(mode,scope):return json.dumps(preset(mode,scope),ensure_ascii=False,indent=2)
     def run(mode,task,files,seed,tokens,order,progress=gr.Progress()):
         pictures=[]
@@ -54,6 +55,10 @@ def build_app(output_dir):
         report,path=retry_directors(report_file,pictures,output_dir,local_files_only=offline,
                                    progress=lambda text:progress(.5,desc=text))
         return director_result(report,path)
+    def repair_tokenizer(report_file):
+        if not report_file:raise gr.Error('請先選擇完整對照紀錄 JSON。')
+        result,path=repair_from_report(report_file,output_dir)
+        return result,str(path)
     with gr.Blocks(title='蕉宗 27B 大導演試煉場') as demo:
         gr.Markdown('# 🍌 蕉宗大導演試煉場\n官方 Qwen3.5 9B／27B，同任務、同 Seed、相同 NF4 量化，輪流載入。只測計畫與畫面描述，不生成影片。')
         gr.Markdown('這不是正式版 H3 專用改寫 9B 的直接對照。技術格式通過也不等於故事正確；請人工比較角色、因果、段落發展與結尾。')
@@ -87,6 +92,14 @@ def build_app(output_dir):
                 offline=gr.Checkbox(value=True,label='模型只讀已下載快取（缺檔時會報錯，可取消後重試）')
                 gr.Markdown('沿用紀錄中的故事、指令、Seed 和模型 revision；上方圖片需與原測試相同。'
                             '成功稿不重跑，另存一份重試紀錄。')
+                repair_button=gr.Button('檢查／修復 tokenizer.json（保留模型權重）')
+                repair_status=gr.JSON(label='Tokenizer 檢查／修復結果')
+                repair_download=gr.File(label='Tokenizer 修復紀錄')
+                gr.Markdown('僅供 loading_processor 的 JSONDecodeError：先檢查快取，'
+                            '只有檔案無效或缺少才下載同版本 tokenizer.json；壞檔先備份，權重不重抓。'
+                            '修復成功後，再按下方只重試失敗稿。')
+                repair_button.click(repair_tokenizer,[retry_file],[repair_status,repair_download],
+                    concurrency_limit=1,concurrency_id='bench_gpu')
                 retry_button=gr.Button('只重試失敗稿')
                 retry_button.click(retry_director,[retry_file,director_images,offline],
                     [off_text,on_text,director_stats,director_download],
