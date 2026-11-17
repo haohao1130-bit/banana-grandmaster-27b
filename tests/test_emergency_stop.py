@@ -11,7 +11,6 @@ class PreciseStopTests(unittest.TestCase):
         app.CANCEL.discard('resume_test')
         app.STOP_AFTER_CURRENT.discard('stop_test')
         app.STOP_AFTER_CURRENT.discard('resume_test')
-        services._REWRITE_PROMPT_ID=None
 
     def test_graceful_stop_never_interrupts_comfy_and_records_after_current(self):
         job={'id':'stop_test','status':'running',
@@ -105,14 +104,15 @@ class PreciseStopTests(unittest.TestCase):
             app.stop_job('stop_test')
         cancel.assert_called_once_with({},'retake-current')
 
-    def test_active_9b_is_interruptible_too(self):
+    def test_active_27b_is_interruptible_without_comfy_prompt(self):
         job={'id':'stop_test','status':'running','segments':[{'status':'rewriting'}]}
         with patch.object(app,'read_state',return_value=job), \
-             patch.object(app.backend,'load_config',return_value={}), \
-             patch.object(app.backend,'active_rewrite_prompt_id',return_value='9b-director'), \
-             patch.object(comfy,'cancel_prompt',return_value='interrupt_requested') as cancel:
-            app.stop_job('stop_test')
-        cancel.assert_called_once_with({},'9b-director')
+             patch.object(app.backend,'active_rewrite_prompt_id',return_value=None), \
+             patch.object(app.backend,'cancel_27b') as cancel, \
+             patch.object(comfy,'cancel_prompt',side_effect=AssertionError('must not interrupt Comfy H3')):
+            result=app.stop_job('stop_test')
+        cancel.assert_called_once_with()
+        self.assertEqual(result['interruption'],'27b_cancel_requested')
 
     def test_wait_generation_does_not_wait_after_manual_cancel(self):
         job={'id':'stop_test'}
@@ -122,15 +122,12 @@ class PreciseStopTests(unittest.TestCase):
             with self.assertRaisesRegex(InterruptedError,'取消'):
                 app.wait_generation({},'h3-current',job)
 
-    def test_rewrite_prompt_id_cleared_even_after_interruption(self):
-        def see_active(cfg,pid):
-            self.assertEqual(services.active_rewrite_prompt_id(),'9b-in-progress')
-            raise InterruptedError('9B cancelled')
-        with patch.object(services,'build_rewrite_graph',return_value=({},[])), \
-             patch.object(services,'queue_prompt',return_value='9b-in-progress'), \
-             patch.object(services,'wait_prompt',side_effect=see_active):
+    def test_27b_rewriter_interruption_leaves_no_comfy_prompt(self):
+        with patch.object(services,'comfy',return_value={}) as unload, \
+             patch.object(services.llama27b,'generate',side_effect=InterruptedError('27B cancelled')):
             with self.assertRaises(InterruptedError):
                 services.rewrite_local({},'system',[],'test')
+        unload.assert_called_once_with({},'/free',{'unload_models':True,'free_memory':True})
         self.assertIsNone(services.active_rewrite_prompt_id())
 
     def test_resume_must_not_reuse_stopped_partial_clip(self):
