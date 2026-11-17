@@ -154,7 +154,7 @@ try {
         $chosen = $null
         foreach ($release in $releases) {
             $main = @($release.assets | Where-Object { $_.name -match '^llama-.*-bin-win-cuda-13(\.\d+)?-x64\.zip$' } | Select-Object -First 1)
-            $cudart = @($release.assets | Where-Object { $_.name -match '^cudart-llama-.*-bin-win-cuda-13(\.\d+)?-x64\.zip$' } | Select-Object -First 1)
+            $cudart = @($release.assets | Where-Object { $_.name -match '^cudart-llama(?:-.*)?-bin-win-cuda-13(\.\d+)?-x64\.zip$' } | Select-Object -First 1)
             if ($main.Count -gt 0 -and $cudart.Count -gt 0) {
                 $chosen = @{ main=$main[0]; runtime=$cudart[0]; tag=$release.tag_name }
                 break
