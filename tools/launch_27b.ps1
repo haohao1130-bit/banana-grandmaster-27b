@@ -15,6 +15,17 @@ $out = Join-Path $Root 'Output'
 $yaml = Join-Path $runtime 'extra_model_paths.yaml'
 if (!(Test-Path -LiteralPath $python)) { throw "27B Python missing: $python. Run Install_BANANAMV_27B.cmd." }
 if (!(Test-Path -LiteralPath (Join-Path $comfy 'main.py'))) { throw 'Independent ComfyUI missing; run installer.' }
+# Safe one-click startup update. Never reset local edits or switch branches.
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $current = (& git -C $app branch --show-current 2>$null).Trim()
+    $dirty = & git -C $app status --porcelain
+    if ($current -eq 'experiment/rtx5070-latest-27b-lab' -and !$dirty) {
+        & git -C $app pull --ff-only origin experiment/rtx5070-latest-27b-lab
+        if ($LASTEXITCODE -ne 0) { Write-Warning '27B auto-update skipped: network/divergence; keeping existing working source.' }
+    } else {
+        Write-Warning '27B local source edits / different branch detected; no update or reset.'
+    }
+}
 foreach ($dir in @($data,$logs,$out)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 $env:BANANA_DATA = $data
 $env:BANANA_PORT = '8195'
@@ -26,6 +37,21 @@ $env:BANANA_27B_MMPROJ = (Join-Path $models '27B\mmproj-BF16.gguf')
 $env:BANANA_27B_PORT = '8217'
 $env:BANANA_MUSIC_PYTHON = (Join-Path $runtime 'music-venv\Scripts\python.exe')
 $env:HF_HOME = (Join-Path $Root 'Cache\huggingface')
+$mustHave = @(
+  '27B\Qwen3.5-27B-Q4_K_M.gguf',
+  '27B\mmproj-BF16.gguf',
+  'H3\diffusion_models\Minimax-h3_Singularity_x_10Eros-Max_PRISM_int8.safetensors',
+  'H3\text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+  'H3\vae\minimax_h3_video_vae_int8_convrot.safetensors',
+  'H3\vae\minimax_h3_audio_vae_fp32.safetensors',
+  'H3\loras\H3_Combat_V2.safetensors',
+  'H3\loras\Motion_Repair.safetensors'
+)
+if (@($mustHave | Where-Object { !(Test-Path -LiteralPath (Join-Path $models $_)) }).Count -gt 0) {
+    Write-Host 'Missing model file detected; downloading and repairing model inventory...'
+    & $python (Join-Path $app 'tools\install_27b_models.py') --models-root $models
+    if ($LASTEXITCODE -ne 0) { throw 'Model repair failed; rerun installer.' }
+}
 $configFile = Join-Path $data 'config.json'
 $config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=(Join-Path $comfy 'input');
              free_after_rewrite=$true;
