@@ -210,7 +210,7 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
   vm.runInContext("renderPrompts({id:'fallback',segments:[{prompt:'manual copy'}]});navigator.clipboard=null",context);await els['copy-prompt'].onclick();assert.equal(els['rewritten-prompt'].selected,true);assert(els['copy-feedback'].textContent.includes('長按'));
 
   vm.runInContext("renderProgress({status:'running',segments:[{status:'generating'},{},{},{}]})",context);assert.equal(els.progress.value,0);assert.equal(els.progress.max,4);assert.equal(els['progress-label'].textContent,'整體完成 0／4 段（0%）');assert.equal(els['current-activity'].hidden,false);assert(els['activity-text'].textContent.includes('第 1／4 段 · 影片採樣中'));
-  vm.runInContext("renderProgress({status:'running',segments:[{status:'done'},{status:'rewriting'},{},{}]})",context);assert.equal(els.progress.value,1);assert(els['progress-label'].textContent.includes('25%'));assert(els['activity-text'].textContent.includes('9B 當段自動導演'));
+  vm.runInContext("renderProgress({status:'running',segments:[{status:'done'},{status:'rewriting'},{},{}]})",context);assert.equal(els.progress.value,1);assert(els['progress-label'].textContent.includes('25%'));assert(els['activity-text'].textContent.includes('27B 當段自動導演'));
   const continuation={status:'retaking',segments:Array.from({length:17},(_,i)=>({status:i<14?'done':'waiting'})),
     continuation_generation:{anchor_index:13,anchor_take:'abcdef123456',anchor_version:2,from_index:14,total:3},
     retake:{branch:{mode:'cascade',index:13,take:'abcdef123456'},completed:0,current:14,
@@ -351,16 +351,16 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
   assert.equal(els['clip-list'].children[1].children[1],rows[1].video);
   await els['clips-retake'].onclick();
   assert.deepEqual(retakes.at(-1),{id:'review123',indices:[1,2],instructions:{'1':'只把手部操作拍清楚'},previous_takes:{'1':'original'}});
-  // New one-clip prompt workbench: do not queue H3 when asking 9B to recompose.
+  // New one-clip prompt workbench: do not queue H3 when asking 27B to recompose.
   vm.runInContext(`renderClipPreviews(${JSON.stringify(reviewJob)})`,context);
   assert.equal(rows[1].rewriteButton.disabled,false);
   assert(rows[1].promptEditor.value.includes('Original H3 prompt'));
   await rows[1].rewriteButton.onclick();
   assert.deepEqual(rewrites,[{id:'review123',index:1,previous_take:'original'}]);
-  assert.equal(retakes.length,2,'9B text rewrite does not queue a video retake');
-  reviewJob.segments[1].prompt_rewrite={status:'ready',version:1,text:'subject_definitions:\n9B rewritten clip\nsummary:\nClip changed'};
+  assert.equal(retakes.length,2,'27B text rewrite does not queue a video retake');
+  reviewJob.segments[1].prompt_rewrite={status:'ready',version:1,text:'subject_definitions:\n27B rewritten clip\nsummary:\nClip changed'};
   vm.runInContext(`renderClipPreviews(${JSON.stringify(reviewJob)})`,context);
-  assert(rows[1].promptEditor.value.includes('9B rewritten clip'));
+  assert(rows[1].promptEditor.value.includes('27B rewritten clip'));
   rows[1].promptEditor.value='subject_definitions:\nMy own custom revised clip';
   rows[1].promptEditor.oninput();
   vm.runInContext(`renderClipPreviews(${JSON.stringify(reviewJob)})`,context);
@@ -370,7 +370,7 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
   assert.deepEqual(retakes.at(-1),{
     id:'review123',indices:[1],prompts:{'1':'subject_definitions:\nMy own custom revised clip'},previous_takes:{'1':'original'}
   });
-  // A new previous Take is an explicit source for both 9B and H3.
+  // A new previous Take is an explicit source for both 27B and H3.
   rows[0].select.value='abcdef123456';rows[0].select.onchange();
   await rows[1].rewriteButton.onclick();
   assert.deepEqual(rewrites.at(-1),{id:'review123',index:1,previous_take:'abcdef123456'});
