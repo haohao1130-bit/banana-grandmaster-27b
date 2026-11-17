@@ -220,7 +220,7 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
   assert.equal(els.progress.value,14,'new continuation begins with only the anchor and earlier clips done');
   assert(els['progress-label'].textContent.includes('第 14 段 V2 接續'));
   assert(els['progress-label'].textContent.includes('本次完成 0／3 段'));
-  assert(els['activity-text'].textContent.includes('第 15／17 段 · 9B 重新編寫'));
+  assert(els['activity-text'].textContent.includes('第 15／17 段 · 27B 重新編寫'));
   continuation.segments[14].status='generating';
   continuation.segments[14].takes[0].status='generating';
   vm.runInContext(`renderProgress(${JSON.stringify(continuation)})`,context);
