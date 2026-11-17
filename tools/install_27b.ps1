@@ -164,8 +164,24 @@ try {
         New-Item -ItemType Directory -Force -Path $llamaFolder | Out-Null
         foreach ($item in @($chosen.main,$chosen.runtime)) {
             $zip = Join-Path $Runtime $item.name
-            if (!(Test-Path $zip)) {
-                Invoke-WebRequest -UseBasicParsing -Uri $item.browser_download_url -OutFile $zip -Headers @{ 'User-Agent'='BANANAMV-27B-OneClick' }
+            $validZip = $false
+            if (Test-Path $zip) {
+                try {
+                    $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
+                    try { $validZip = ($archive.Entries.Count -gt 0) }
+                    finally { $archive.Dispose() }
+                } catch { $validZip = $false }
+            }
+            if (!$validZip) {
+                # Never retain an interrupted/incomplete download as a valid cached ZIP.
+                Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
+                $partial = "$zip.partial"
+                Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+                Invoke-WebRequest -UseBasicParsing -Uri $item.browser_download_url -OutFile $partial -Headers @{ 'User-Agent'='BANANAMV-27B-OneClick' }
+                $archive = [System.IO.Compression.ZipFile]::OpenRead($partial)
+                try { if ($archive.Entries.Count -eq 0) { throw 'llama.cpp archive is empty' } }
+                finally { $archive.Dispose() }
+                Move-Item -LiteralPath $partial -Destination $zip -Force
             }
             $expanded = Join-Path $Runtime ('unzip_'+$item.name.Replace('.zip',''))
             New-Item -ItemType Directory -Force -Path $expanded | Out-Null
