@@ -34,9 +34,11 @@ class ServicesTests(unittest.TestCase):
         self.assertIn('27B',cfg['rewriter']['model'])
         pics=[Image.new('RGB',(64,64),c) for c in ('red','blue')]
         parts=[('text','<Picture 1>'),('image',pics[0]),('text','<Picture 2>'),('image',pics[1])]
-        with patch.object(services.llama27b,'generate',return_value='hello') as director:
+        with patch.object(services.llama27b,'generate',return_value='hello') as director, \
+             patch.object(services,'comfy',return_value={}) as free:
             self.assertEqual(services.rewrite_local(cfg,'guide',parts,'test'),'hello')
             director.assert_called_once_with(cfg,'guide',parts,'test')
+            free.assert_called_once_with(cfg,'/free',{'unload_models':True,'free_memory':True})
         with patch.object(services.llama27b,'stop') as release, \
              patch.object(services,'_comfy_queue_prompt',return_value='h3-prompt') as queue:
             self.assertEqual(services.queue_prompt(cfg,{'1':{}}),'h3-prompt')
