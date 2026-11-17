@@ -212,7 +212,11 @@ def repair_prompt(cfg,job,seg,prompt,note,originals,tail,dest,prefix=""):
     if tail:text+='\n<Picture 1> is the actual preceding last frame; other picture numbers already include this slot.'
     request={'system':system,'user':text,'references':[{'slot':i+1,'sha256':hashlib.sha256(Path(p).read_bytes()).hexdigest()} for i,p in enumerate(refs)]}
     (dest/(prefix+'repair_request.json')).write_text(json.dumps(request,ensure_ascii=False,indent=2),encoding='utf-8')
-    raw=app.backend.rewrite_local(cfg,system,[('text',text)]+_pictures(refs),uuid.uuid4().hex[:8])
+    try:
+        raw=app.backend.rewrite_local(cfg,system,[('text',text)]+_pictures(refs),uuid.uuid4().hex[:8])
+    finally:
+        # Prompt-only repair does not queue H3; still free the owned 27B GPU process.
+        app.backend.release_27b()
     (dest/(prefix+'repair_raw.txt')).write_text(raw,encoding='utf-8')
     return normalize_mv_prompt(_text(raw),len(refs))
 
