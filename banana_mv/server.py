@@ -455,8 +455,10 @@ def stop_job(job_id):
     if not pid:
         pid=backend.active_rewrite_prompt_id()
     if not pid:
-        return {'ok':True,'message':'已要求停止；此階段尚未取得 ComfyUI 任務 ID，將停止後續生成。',
-                'interruption':'cancel_requested'}
+        # A 27B rewrite has no ComfyUI prompt ID; cancel only our own llama worker.
+        backend.cancel_27b()
+        return {'ok':True,'message':'已要求中斷 27B 導演並停止後續生成。',
+                'interruption':'27b_cancel_requested'}
     try:
         cfg=backend.load_config()
         result=cancel_prompt(cfg,pid)
@@ -484,7 +486,7 @@ def export_finished_video(job,source,*,refined_version=None,upscaled_version=Non
     configured = os.environ.get('BANANA_FINISHED_VIDEOS')
     if configured:
         folder = Path(configured)
-    elif sys.platform == 'win32' and backend.PORT == 8193:
+    elif sys.platform == 'win32' and backend.PORT in (8193, 8195):
         folder = Path(r'F:\BANANAMV\videos')
     else:
         folder = backend.DATA / 'videos'
@@ -830,7 +832,10 @@ def worker(job, cfg, original, song, drive):
     finally:
         CANCEL.discard(job['id'])
         STOP_AFTER_CURRENT.discard(job['id'])
-        GPU_LOCK.release()
+        try:
+            backend.release_27b()
+        finally:
+            GPU_LOCK.release()
 
 
 def start(req):
@@ -918,20 +923,16 @@ def start(req):
     director_prompt(req, plan[0]['seconds'])
     seed = random.randrange(2**48) if req.get('seed') in (None,'') else int(req['seed'])
     authored_prompt = str(req.get('prompt',''))
-    if req['director_schema'] == 6 and not (backend.PORT == 8193 and req.get('rewrite', True)):
+    if req['director_schema'] == 6 and not (backend.PORT in (8193, 8195) and req.get('rewrite', True)):
         authored_prompt = authored_prompt[:10000]
     req = normalize_references(dict(req, prompt=authored_prompt), seconds)
     # Fail invalid image mentions before queueing any rewrite or GPU work.
     fallback_prompt(req['prompt'], False, '', len(images))
     images_comfy = [img['comfy_name'] for img in images]
-    graph = ({'encoder':{'class_type':'CLIPLoader','inputs':{'clip_name':cfg['rewriter']['model']}},
-              'generate':{'class_type':'TextGenerate','inputs':{}}} if req['plan_review'] and req.get('rewrite',True) else
-             build_workflow(images_comfy,'preflight.wav',*size,plan[0]['model_frames'],'',seed,
-                            **graph_options(req,plan[0]['seconds'])))
+    # 27B runs as a separate GGUF worker; ComfyUI preflight checks H3 only.
+    graph = build_workflow(images_comfy,'preflight.wav',*size,plan[0]['model_frames'],'',seed,
+                           **graph_options(req,plan[0]['seconds']))
     preflight(cfg,graph)
-    if req['director_schema'] == whole_song.VERSION and not req['plan_review']:
-        preflight(cfg, {'encoder':{'class_type':'CLIPLoader','inputs':{'clip_name':cfg['rewriter']['model']}},
-                        'generate':{'class_type':'TextGenerate','inputs':{}}})
     preflight_five_frame(cfg, req, images_comfy, size, plan[0], seed)
     if not GPU_LOCK.acquire(blocking=False):
         raise ValueError('已有 MV 工作執行中，請等它完成。')
@@ -1253,7 +1254,7 @@ class Handler(WebHandler):
             return self.send_json({'service':'banana-mv','standalone':True,'instance':SERVER_INSTANCE,
                                    'version':SERVER_BUILD})
         if url.path=='/api/mv/face-refine-capability':
-            return self.send_json({'local5070':backend.PORT==8193})
+            return self.send_json({'local5070':backend.PORT in (8193, 8195)})
         if url.path=='/api/mv/restart-capability':
             return self.send_json(restart_capability())
         if url.path=='/api/config':
