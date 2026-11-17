@@ -2,19 +2,69 @@
 import re
 
 
-_ROLE_BIND = re.compile(r'(?im)^\s*(S[12])\s*[=:：]\s*(<Picture \d+>)')
+_ROLE_BIND = re.compile(r'(?im)^\s*(S[12])\s*[=:：＝]\s*(<Picture \d+>)')
+# Existing one-click MV briefs normally declare <Picture 1>＝角色，S1 instead.
+# Treat either orientation as an explicit identity bind; never infer from image order.
+_IMAGE_ROLE_BIND = re.compile(
+    r'(?im)^\s*(?:(<Picture\s+\d+>)|@(?:圖片|图片|image)\s*(\d+))'
+    r'\s*[=:：＝]\s*[^\n]*?\b(S[12])\b'
+)
+# Long-form director briefs define image, character, and SRT role on separate
+# lines: Subject 1｜name / Use @圖片1 / [S1] = Subject 1.
+_SUBJECT_HEADING = re.compile(
+    r'(?im)^\s*(?:<Subject\s+(\d+)>|Subject\s+(\d+))\s*[｜|:：]\s*\S'
+)
+_ROLE_SUBJECT = re.compile(
+    r'(?im)^\s*\[\s*(S[12])\s*\]\s*[=:：＝]\s*(?:<Subject\s+([12])>|Subject\s+([12]))\b'
+)
+_PICTURE_USE = re.compile(
+    r'(?i)^\s*(?:Use|使用)\s+(?:<Picture\s+(\d+)>|@(?:圖片|图片|image)\s*(\d+))(?=\s|$)'
+)
+_ENGLISH_DIRECTOR_SECTION = re.compile(
+    r'^\s*(?:0[1-9]|10)\s*[｜|]\s*[A-Z]', re.I
+)
 _SUBJECT_LINE = re.compile(r'(?m)^\s*<Subject\s+(\d+)>\s+([^\n]+)')
 _SHOT = re.compile(r'(?im)^\s*\[Shot\s+(\d+)\]')
 _TIME = re.compile(r'(?i)\bAt\s+(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?')
-_VOCAL = re.compile(r'(?i)\b(?:sings?|singing|lip[ -]?sync(?:s|ing)?|mouth\s+(?:moves|moving))\b')
+_VOCAL = re.compile(
+    r'(?i)\b(?:sings?|singing|lip[ -]?sync(?:s|ing)?|mouth\s+(?:moves|moving)|'
+    r'raps|rapping|speaks?|speaking|spoken\s+delivery|recites?|reciting|'
+    r'chants?|chanting)\b'
+)
 _BEACH = re.compile(r'在海邊|到了海邊|海邊步道|海灘|沙灘|浪線|淺水|水花|海浪|海水|beach|shore|surf\s+line', re.I)
 _OLD_S1 = re.compile(r'hoodie|cargo\s+(?:pants|trousers)|連帽外套|工裝長褲', re.I)
 _OLD_S2 = re.compile(r'cardigan|camisole|denim\s+(?:mini\s*)?skirt|針織外套|牛仔裙|蕾絲背心', re.I)
 
 
 def role_pictures(fixed_setup):
-    """Use user-specified identities; never infer singers from picture order."""
-    return {role.upper(): picture for role, picture in _ROLE_BIND.findall(fixed_setup)}
+    """Resolve explicit SRT-to-image links, including multi-line director briefs.
+
+    A Subject heading is not a singer identity by itself. Only a user-written
+    [S1] = Subject 1 rule can connect it to a vocal role. Never guess from
+    picture order, genders, a scene named Subject 3, or soundtrack timbre.
+    """
+    roles = {role.upper(): picture for role, picture in _ROLE_BIND.findall(fixed_setup)}
+    for picture, index, role in _IMAGE_ROLE_BIND.findall(fixed_setup):
+        roles.setdefault(role.upper(), picture or f'<Picture {index}>')
+    subject_pictures = {}
+    current = None
+    for line in fixed_setup.splitlines():
+        if _ENGLISH_DIRECTOR_SECTION.match(line):
+            current = None
+        subject = _SUBJECT_HEADING.match(line)
+        if subject:
+            index = subject[1] or subject[2]
+            current = index if index in ('1', '2') else None
+            continue
+        if current:
+            picture = _PICTURE_USE.match(line)
+            if picture:
+                subject_pictures.setdefault(current, f'<Picture {picture[1] or picture[2]}>')
+    for role, numbered, bracketed in _ROLE_SUBJECT.findall(fixed_setup):
+        ref = subject_pictures.get(numbered or bracketed)
+        if ref:
+            roles.setdefault(role.upper(), ref)
+    return roles
 
 
 def _subject_roles(prompt, pictures):

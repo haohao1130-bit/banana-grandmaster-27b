@@ -642,6 +642,190 @@ class PythonSlotsTests(unittest.TestCase):
         _,inline=split_source('第一幕｜副歌\n「我要打十個！」\n')
         self.assertEqual(inline[0]['actions'],['「我要打十個！」'])
 
+
+    def test_plain_act_clock_uses_srt_not_legacy_action_order(self):
+        # Regression: the real Bai Suzhen brief uses ACT timecodes without
+        # Markdown and <Picture 1>＝蕉大師，S1 (not S1 = <Picture 1>).
+        from banana_mv.commission_guard import role_pictures
+        from banana_mv.shoot_plan import _filming_reference_settings
+        brief = (
+            'BANANAMV｜白蛇千年復仇戰\n'
+            '一、角色與圖片身份\n'
+            '@圖片1＝蕉大師，S1，男性角色\n'
+            '@圖片2＝白素貞，S2，女性角色\n'
+            '二、世界觀、場景與整體故事\n'
+            '古寺與雷峰塔。\n'
+            '四、完整時間軸與電影分鏡\n'
+            'ACT 01｜00:00–00:51.300\n'
+            '00:00–00:10.000｜S2 出場\n'
+            '白素貞接近雷峰塔。\n'
+            '00:41.888–00:51.300｜S1 高速 Machine-Gun Rap\n'
+            '「慢著慢著先別鬧！法海跟我不同號！別拿雷電亂開炮！」\n'
+            '蕉大師敲木魚，金色音波推開洪水。\n'
+            'ACT 02｜00:51.300–01:09.988\n'
+            '00:51.300–01:00.688｜S2 高速 Rap\n'
+            '「一紙封印一座塔！一場風雨一場殺！千年舊恨誰來答！」\n'
+            '白素貞站在水霧中央，揮動雙手。\n'
+            '01:00.688–01:09.988｜S2 高速 Rap 持續\n'
+            '「斷橋斷夢斷前緣！千年千劫千重念！」\n'
+            '白素貞將水霧凝成巨大的雷峰塔幻影。\n'
+            '五、全片連續性與演出規則\n'
+            '1. 不可提早進入最終演唱會舞台。\n'
+            '六、最終導演意圖\n'
+            '雙人最後化敵為友，不能提前拍攝結局。\n'
+        )
+        cues = [
+            {'start':41.888,'end':51.3,'text':'[S1] 別拿雷電亂開炮！'},
+            {'start':51.3,'end':60.688,'text':'[S2] 一紙封印一座塔！'},
+            {'start':60.688,'end':69.988,'text':'[S2] 斷橋斷夢斷前緣！'},
+        ]
+        settings = request()
+        settings.update(prompt=brief, srt_cues=cues, direct_script=False)
+        slots = [{'index':i,'start':i*10.0,'seconds':10.0,
+                  'song_seconds':70.0,'segment_count':7} for i in range(7)]
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            plan = ensure_python_slot_plan(settings, slots,
+                                           [root/'monk.png',root/'snake.png'],root)
+        self.assertEqual(plan['source_timing'],'explicit_markdown')
+        filtered_setup = _filming_reference_settings(plan['shared_setup'])
+        self.assertEqual(role_pictures(filtered_setup),
+                         {'S1':'<Picture 1>','S2':'<Picture 2>'})
+        self.assertNotIn('雙人最後化敵為友',filtered_setup)
+        before = plan['segments'][4]['event']
+        crossing = plan['segments'][5]['event']
+        after = plan['segments'][6]['event']
+        self.assertIn('S1 高速 Machine-Gun Rap',before)
+        self.assertIn('ACT 02',crossing)
+        self.assertIn('S2 高速 Rap',crossing)
+        self.assertIn('S2 高速 Rap 持續',after)
+        # No unscoped future lyric, extra dialogue or post-story finale in any
+        # 10-second filming commission. The song already holds the SRT words.
+        for event in (before,crossing,after):
+            self.assertNotIn('一紙封印一座塔',event)
+            self.assertNotIn('慢著慢著先別鬧',event)
+            self.assertNotIn('雙人最後化敵為友',event)
+            self.assertNotIn('全片連續性與演出規則',event)
+        self.assertNotIn('S1 高速 Machine-Gun Rap',after)
+
+    def test_master_director_prompt_next_line_act_and_global_scene_isolation(self):
+        """The supplied Bai Suzhen long-form structure, not a simplified format."""
+        from banana_mv.timed_slots import parse_timed_source
+        from banana_mv.commission_guard import role_pictures
+        from banana_mv.shoot_plan import _filming_reference_settings
+        text = (
+            '🍌 BANANAMV｜MASTER DIRECTOR PROMPT\n'
+            '01｜PROJECT IDENTITY\n'
+            'Visual Style: Ultra-realistic cinematic fantasy film\n'
+            'The ending becomes a huge concert; this is Python global context.\n'
+            '02｜SUBJECT DEFINITIONS\n'
+            'Subject 1｜蕉大師\n'
+            'Use @圖片1 as the exclusive visual identity reference.\n'
+            'A bald monk wearing grey and orange robes.\n'
+            'Subject 2｜白素貞\n'
+            'Use @圖片2 as the exclusive visual identity reference.\n'
+            'A woman with a continuous white snake tail.\n'
+            'Subject 3｜大乘蕉宗神社\n'
+            'The shrine is a physical environment, not another singer.\n'
+            '03｜ABSOLUTE CHARACTER ENTRANCE LOCK\n'
+            'Subject 1 must not appear before 00:17.813.\n'
+            '04｜AUDIO AND SRT LOCK\n'
+            '[S1] = Subject 1 蕉大師\n'
+            '[S2] = Subject 2 白素貞\n'
+            '05｜MASTER STORY CONCEPT\n'
+            'FINAL STORY SPOILER: they become concert partners after 03:21.\n'
+            '06｜FULL CINEMATIC STORYBOARD\n'
+            'ACT 1｜THE THOUSAND-YEAR REVENGE\n'
+            '\n00:00.000–00:41.888\n'
+            'Sequence 01｜The White Snake Arrives\n'
+            '00:00–00:16.600\n'
+            'Only 白素貞 appears and climbs rain-soaked steps.\n'
+            '00:16.600–00:22.800\n'
+            'Wooden fish reveal and entrance of 蕉大師 at 00:17.813.\n'
+            '00:19.764: 蕉大師 begins his first assigned line.\n'
+            'ACT 2｜I AM NOT FAHAI\n'
+            '\n00:41.888–01:35.645\n'
+            'S1 monk performs a precise rebuttal at 00:41.888.\n'
+            'S2 white snake replies at 00:51.300.\n'
+            'ACT 3｜THE NEXT THOUSAND YEARS\n'
+            '\n01:35.645–02:23.080\n'
+            'The serious question causes a silent reflection.\n'
+            'ACT 4｜THE WHITE SNAKE REBORN\n'
+            '\n02:23.080–03:21.667\n'
+            '白素貞 takes the concert stage in her new mood.\n'
+            'ACT 5｜ANCIENT AND MODERN ON ONE STAGE\n'
+            '\n03:21.667–04:20.733\n'
+            'A coherent epic musical collaboration begins.\n'
+            'ACT 6｜THE OLD SCORE IS NOT SETTLED\n'
+            '\n04:20.733–04:42.540\n'
+            'The dry final joke ends with 蕉大師 speaking.\n'
+            '07｜CINEMATOGRAPHY AND EDITING RULES\n'
+            'No random filler shots.\n'
+            '08｜VISUAL CONSISTENCY AND NEGATIVE CONSTRAINTS\n'
+            'No random monsters.\n'
+            "09｜DIRECTOR'S PRIORITY ORDER\n"
+            'Do not show the monk too early.\n'
+            '10｜FINAL DIRECTOR CHECKLIST\n'
+            'FINAL CHECKLIST ONLY: verify the full movie outcome.\n'
+        )
+        from banana_mv.core import map_image_mentions
+        fixed, chapters = parse_timed_source(map_image_mentions(text,2))
+        self.assertEqual(len(chapters),6,[c['title'] for c in chapters])
+        self.assertEqual([(round(c['start'],3),round(c['end'],3)) for c in chapters],
+                         [(0.,41.888),(41.888,95.645),(95.645,143.08),
+                          (143.08,201.667),(201.667,260.733),(260.733,282.54)])
+        self.assertEqual(role_pictures(fixed),
+                         {'S1':'<Picture 1>','S2':'<Picture 2>'})
+        filtered=_filming_reference_settings(fixed)
+        self.assertIn('Environment: 大乘蕉宗神社',filtered)
+        self.assertNotIn('MASTER STORY CONCEPT',filtered)
+        self.assertNotIn('FINAL STORY SPOILER',filtered)
+        self.assertNotIn('FINAL CHECKLIST ONLY',filtered)
+        self.assertNotIn('Subject 3｜',filtered)
+        self.assertIn('Visual Style:',filtered)
+        req=dict(request(),prompt=text,direct_script=False,srt_cues=[
+            {'start':1.205,'end':3.3,'text':'[S2] 開場'},
+            {'start':17.813,'end':18.979,'text':'[S1] 阿彌陀蕉'},
+            {'start':19.764,'end':22.8,'text':'[S1] 施主認錯和尚'},
+            {'start':41.888,'end':51.3,'text':'[S1] Rap'},
+            {'start':51.3,'end':69.988,'text':'[S2] 復仇'},
+        ])
+        parts=[{'index':i,'start':i*10.0,'seconds':10.0,
+                'song_seconds':282.54,'segment_count':29} for i in range(28)]
+        parts.append({'index':28,'start':280.,'seconds':2.54,
+                      'song_seconds':282.54,'segment_count':29})
+        with tempfile.TemporaryDirectory() as d:
+            root=Path(d)
+            plan=ensure_python_slot_plan(req,parts,[root/'monk.png',root/'snake.png'],root)
+        self.assertEqual(plan['source_timing'],'explicit_markdown')
+        self.assertEqual(len(plan['segments']),29)
+        self.assertNotIn('FINAL STORY SPOILER',plan['segments'][0]['event'])
+        self.assertNotIn('FINAL CHECKLIST ONLY',plan['segments'][-1]['event'])
+        self.assertNotIn('concert partners',plan['segments'][0]['event'])
+        self.assertNotIn('The dry final joke',plan['segments'][0]['event'])
+        self.assertIn('Only 白素貞',plan['segments'][0]['event'])
+        self.assertNotIn('entrance of 蕉大師',plan['segments'][0]['event'])
+        self.assertIn('@7.813s',plan['segments'][1]['event'])
+        self.assertIn('entrance of 蕉大師',plan['segments'][1]['event'])
+        self.assertIn('The dry final joke',plan['segments'][28]['event'])
+
+    def test_standalone_second_precise_entrance_clocks_are_local(self):
+        from banana_mv.timed_slots import _timed_action_events
+        chapter={'start':0.,'end':25.,'actions':[
+            '00:00–00:16.600',
+            '白素貞 glides alone through the shrine.',
+            '00:16.600:',
+            'Cut to the wooden fish only.',
+            '00:17.813:',
+            'Reveal 蕉大師 on camera for the first time.',
+            '00:19.764: 蕉大師 performs the S1 line.',
+        ]}
+        events=_timed_action_events(chapter,[])
+        found=dict(events)
+        self.assertEqual(found['Reveal 蕉大師 on camera for the first time.'],17.813)
+        self.assertEqual(found['00:19.764: 蕉大師 performs the S1 line.'],19.764)
+        self.assertNotIn('00:17.813:',found)
+
     def test_notebook_is_named_branch_pinned_and_drive_is_separate(self):
         root=Path(__file__).resolve().parents[1]
         nb=json.loads((root/'BANANAMV_CLASSIC_PYTHON_SLOT_EXPERIMENT.ipynb').read_text(encoding='utf-8'))

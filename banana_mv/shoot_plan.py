@@ -8,7 +8,7 @@ from banana_mv.commission_guard import check_commission, role_pictures, wardrobe
 from banana_mv.core import map_image_mentions, normalize_mv_prompt
 from banana_mv.director import MODES
 from banana_mv.lyrics_reference import SUBJECT_VOCAL_PREFIX, clean_lyric_output, excerpt, vocal_timeline
-from banana_mv.locked_shoot import write_locked_shoot_prompt
+from banana_mv.director_shoot import write_director_shoot_prompt
 from banana_mv.mv_scope import clip_ending, ending_contract
 from banana_mv.scene_state import SceneStateError, atomic_json, digest, rewrite_retry_count
 
@@ -408,9 +408,8 @@ def _local_event(event):
 
 
 def _apply_source_performance(prompt, timeline, fixed_setup):
-    bindings = {role.upper(): picture for role, picture in re.findall(
-        r'(?im)^\s*(S[12])\s*[=：:]\s*(<Picture \d+>)', fixed_setup
-    )}
+    # The same user-defined SRT identities drive both filming paths.
+    bindings = role_pictures(fixed_setup)
     rows = []
     for cue in timeline:
         subjects = cue.get('subjects', [])
@@ -458,6 +457,9 @@ _STORY_FILMING_HEADINGS = frozenset((
     '劇情連續性', '服裝連續性', '演唱與劇情安排',
     '導演自由發揮', '導演執行重點', '執行重點',
     '特殊要求', '全曲執行原則', '全曲固定原則',
+    'Story', 'Story spine', 'Storyline', 'Story synopsis',
+    'Plot', 'Plot arc', 'Whole song story', 'Full story',
+    'Ending', 'Finale', 'Resolution', 'Future events',
 ))
 _FUTURE_FILMING = re.compile(
     r'前半段|後半段|中段|後段|末段|後面|最後|最終|結局|謝幕|尾聲|'
@@ -466,8 +468,20 @@ _FUTURE_FILMING = re.compile(
     r'→|->|⇒|'
     r'從.{0,90}(?:出發|開始).{0,100}(?:到|再|回)|'
     r'先.{0,75}(?:再|然後|接著)|'
-    r'(?:接著|然後|隨後|之後).{0,75}(?:抵達|換上|脫下|去|回)',
+    r'(?:接著|然後|隨後|之後).{0,75}(?:抵達|換上|脫下|去|回)|'
+    r'\b(?:eventually|finally|ultimately|later|afterwards|final scene|'
+    r'final shot|future concert|in the end|end of the (?:film|mv|story)|'
+    r'the ending|the finale|whole[- ]song plot|story spine|plot arc)\b',
     re.I,
+)
+_NATIVE_SECTION = re.compile(r'^(0[1-9]|10)\s*[｜|]\s*([A-Z][A-Z\s\'-]+)$', re.I)
+_NATIVE_STATIC_PROJECT = re.compile(
+    r'^(?:Project|Format|Duration|Aspect Ratio|Visual Style|Resolution|Editing Style|Genre)\s*:',
+    re.I,
+)
+_NATIVE_FUTURE = re.compile(
+    r'\b(?:eventually|finally|ultimately|gradually|later|after the performance|'
+    r'second half|ending|finale|becomes a concert)\b', re.I,
 )
 _STATIC_FILMING_FACT = re.compile(
     r'^(?:S[12]\s*[=:：]|<Picture \d+>|@圖片\d+|'
@@ -489,6 +503,42 @@ def _filming_reference_settings(fixed_setup):
         title = line.rstrip('：:').strip()
         if title.startswith('【') and title.endswith('】'):
             title = title[1:-1].strip()
+        # English director notes often use inline headings rather than ACT blocks.
+        # An inline "Story spine: ... / Finale: ..." is a global plot, never
+        # a reusable static actor fact for a per-clip 9B cinematographer.
+        if re.match(
+            r'(?i)^(?:story(?:\s+spine|\s+synopsis|\s+arc|\s+outline)?|'
+            r'storyline|plot(?:\s+arc|\s+outline)?|whole[- ]song\s+story|'
+            r'full\s+story|ending|finale|resolution|future\s+events)\s*[:：]',
+            line,
+        ):
+            section = 'story'
+            continue
+        # Long-form English director packages embed the full future screenplay
+        # before and after the ACTs. Only static project/cast facts go to 9B.
+        native = _NATIVE_SECTION.match(title)
+        if native:
+            section = ('native_project' if native[1] == '01' else
+                       'native_cast' if native[1] == '02' else 'story')
+            continue
+        if section == 'native_project':
+            if _NATIVE_STATIC_PROJECT.match(line):
+                result.append(raw)
+            continue
+        if section == 'native_cast':
+            if _NATIVE_FUTURE.search(line):
+                continue
+            # The shrine is an environment, not a third singer or actor.
+            if re.match(r'(?i)^Subject\s+3\s*[｜|:：]',line):
+                result.append(re.sub(r'(?i)^Subject\s+3\s*[｜|:：]', 'Environment: ', raw))
+            else:
+                result.append(raw)
+            continue
+        # Author's concluding story explanation is useful for Python's plan,
+        # never a current-shot instruction for the isolated 9B cameraman.
+        if re.match(r'^[一二三四五六七八九十]+[、.．]\s*(?:最終導演意圖|結語)', title):
+            section = 'story'
+            continue
         if title in _FIXED_FILMING_HEADINGS:
             section = 'fixed'
             result.append(raw)
@@ -524,12 +574,19 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
         # Only numbering changes for an actual keyframe. Never compact actor slots.
         return re.sub(r'<Picture (\d+)>',lambda m:f'<Picture {int(m[1])+offset}>',text)
     fixed_setup=segment.get('fixed_reference_settings','')
+    # Read explicit singer mappings BEFORE stripping global SRT and future-story
+    # sections; then forward only canonical, static role/image identities.
+    source_singers=role_pictures(fixed_setup)
     event = _local_event(row['event'])
     vocals = vocal_timeline(excerpt(req, segment))
     context = {'authored_vocal_timeline': vocals, 'ending': clip_ending(req, segment)}
     fixed_setup = re.split(r'(?m)^===\s*STORY OUTCOME\s*===\s*$', fixed_setup, maxsplit=1)[0]
     fixed_setup = _fixed_reference_with_python_priority(fixed_setup, event)
     fixed_setup = _filming_reference_settings(fixed_setup)
+    present=role_pictures(fixed_setup)
+    for role,picture in source_singers.items():
+        if present.get(role)!=picture:
+            fixed_setup += ('\n' if fixed_setup else '') + role + ' = ' + picture
     if fixed_setup:
         context['fixed_reference_settings'] = connected(fixed_setup)
     pictures = role_pictures(context.get('fixed_reference_settings', ''))
@@ -537,9 +594,10 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     if wardrobe:
         context['current_wardrobe'] = wardrobe
 
-    # SRT-authored dual singers: Python owns shot cuts, cast, wardrobes and final
-    # Ref2VA sections; 9B supplies only shot-specific visual descriptions.
-    # Keep the legacy native writer for other configurations and unscripted clips.
+    # SRT-authored dual singers: Python owns singer timing, cast, wardrobe and
+    # final H3 sections. 9B owns the number and timing of CAMERA cuts. Never
+    # convert an SRT handoff into a compulsory new shot.
+    # All other legacy and unscripted routes stay unchanged.
     if (req.get('director_schema') == 6 and len(originals) == 2
             and {'S1', 'S2'} <= set(pictures)
             and req.get('srt_cues')
@@ -547,7 +605,7 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
                     for c in req['srt_cues'])):
         refs = ([tail] if tail else []) + list(originals)
         segment['director_mode'] = row['mode']
-        native = write_locked_shoot_prompt(
+        native = write_director_shoot_prompt(
             cfg, req, segment, event, fixed_setup, pictures, wardrobe, refs,
             _pictures(refs), rewrite, progress)
         native, removed = clean_lyric_output(

@@ -6,10 +6,26 @@ assert(html.indexOf('id="final-previews"')<html.indexOf('id="clip-review"'),
 assert(html.indexOf('id="upscale-again"')<html.indexOf('id="upscale-preview"'),
   'upgrade action must be near the master, not at the end of the 1080P result panel');
 assert.equal(html.split('id="upscale-again"').length,2,'exactly one working upgrade button');
-assert(html.indexOf('id="event-plan-details"')<html.indexOf('id="progress-summary"'),
-  'event plan belongs above the long progress report');
+assert(html.indexOf('id="recipe-review"')<html.indexOf('id="event-plan-details"'),
+  'recipe confirmation and full cast review must sit above the event plan');
+assert(html.indexOf('id="event-plan-details"')<html.indexOf('id="alchemy-title"'),
+  'full commission details belong above the live furnace on both layouts');
+assert(html.indexOf('id="alchemy-title"')<html.indexOf('id="stop"')
+    &&html.indexOf('id="stop"')<html.indexOf('id="stop-emergency"')
+    &&html.indexOf('id="stop-emergency"')<html.indexOf('id="progress-summary"'),
+  'both distinct stop controls must sit immediately beneath the furnace');
+assert(html.includes('#furnace-stop-controls .emergency-stop{background:#a82424;color:#fff'),
+  'the immediate interrupt button must be visibly red');
+assert.equal(html.split('id="stop-emergency"').length,2,
+  'exactly one emergency stop button should exist');
 assert(html.indexOf('id="progress-summary"')<html.indexOf('id="clip-review"'),
-  'clip-by-clip take review remains below the event plan and progress');
+  'clip-by-clip take review remains below the furnace progress');
+assert(html.indexOf('id="rewritten-panel"')<html.indexOf('id="clip-review"'),
+  'finished clips and H3 prompts belong above the final per-clip take review');
+assert(!html.includes("insertAdjacentElement('afterend',recipe)"),
+  'mobile viewport must not move approval below furnace progress');
+assert(html.includes('#recipe-text{max-height:min(52vh,520px);overflow-y:auto'),
+  'long 29-clip recipe scrolls internally without burying controls');
 assert(html.includes('#event-plan-text{max-height:340px;overflow-y:auto'),
   'a 24-clip event list should scroll inside its own panel');
 assert(html.includes('#status{max-height:340px;overflow-y:auto'),
@@ -29,18 +45,21 @@ class Element{
   getBoundingClientRect(){return {left:20,right:680,top:20,bottom:800};}
   select(){this.selected=true;}
   setRangeText(text,start,end){this.value=this.value.slice(0,start)+text+this.value.slice(end);this.selectionStart=this.selectionEnd=start+text.length;}
+  scrollIntoView(){this.scrolled=true;}
+  insertAdjacentElement(position,child){child.insertPosition=position;return child;}
 }
 const els=Object.fromEntries([...html.matchAll(/\bid="([^"]+)"/g)].map(m=>[m[1],new Element()]));
 Object.assign(els.mode,{value:'independent'});els.aspect.value='16:9';els.resolution.value='720p';els.width.value='1280';els.segment.value='10';els.project_scope.value='full';els.rewrite_retries.value='5';els.director.value='performance';els.intensity.value='high';els.face_identity.checked=true;els.audio_analysis.checked=true;els.music_structure.checked=true;els.rewrite.checked=true;els.persistent_scene_state.checked=true;els.kitchen_attention.checked=true;els.motion_lora.checked=true;
-const posts=[],uploads=[],resumes=[],copied=[],retakes=[],selections=[],rewrites=[],branches=[];let reviewJob;const approvals=[];let recipeOpened=false;
+const posts=[],uploads=[],resumes=[],copied=[],retakes=[],selections=[],rewrites=[],branches=[],gracefulStops=[],emergencyStops=[];let reviewJob;const approvals=[];let recipeOpened=false;
 let restartState={available:false,busy:false,reason:'5070 桌面管家尚未啟動'};
 let serverInstance='mv-service-a',restartRequestInstance='mv-service-a',reloadCount=0;
 const storage=new Map(),restartRequests=[];
 const intervals=[];
+const mobileViewport={matches:false,addEventListener(){}};
 const context=vm.createContext({document:{getElementById:id=>{assert(els[id],`Missing DOM element ${id}`);return els[id];},createElement:()=>new Element()},
   URL:{createObjectURL:file=>'blob:'+file.name,revokeObjectURL:()=>{}},
   localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,v)=>storage.set(key,String(v)),removeItem:key=>storage.delete(key)},
-  window:{confirm:()=>true,location:{reload:()=>{reloadCount++;}}},
+  window:{confirm:()=>true,location:{reload:()=>{reloadCount++;}},matchMedia:()=>mobileViewport},
   setTimeout:(fn,ms)=>{if(ms===2000)fn();return 0;},clearTimeout:()=>{},setInterval:(fn,ms)=>{intervals.push({fn,ms});return intervals.length;},console,navigator:{clipboard:{writeText:async text=>{copied.push(text);}}},
   fetch:async(url,options)=>({ok:true,status:200,json:async()=>{
     if(url==='api/mv/restart-capability')return restartState;
@@ -49,6 +68,8 @@ const context=vm.createContext({document:{getElementById:id=>{assert(els[id],`Mi
     if(url==='api/upload'){uploads.push(options.body.name);return {id:options.body.name};}
     if(url==='api/mv/start'){const body=JSON.parse(options.body);posts.push(body);return {id:body.plan_review?'recipe123':'abcd'};}
     if(url==='api/mv/open-furnace'){approvals.push(JSON.parse(options.body));recipeOpened=true;return {id:'recipe123',status:'running'};}
+    if(url==='api/mv/stop-after-current'){gracefulStops.push(JSON.parse(options.body));return {ok:true,interruption:'after_current_requested',message:'本段生成完成後停止'};}
+    if(url==='api/mv/stop'){emergencyStops.push(JSON.parse(options.body));return {ok:true,interruption:'interrupt_requested',message:'立即中斷已要求'};}
     if(url==='api/mv/status?id=recipe123')return {id:'recipe123',title:'丹方',seed:0,duration:30,status:recipeOpened?'running':'plan_ready',plan_revision:'recipe-v1',plan_preview_setup:'<Picture 1> is the singer.',request:{plan_review:true,director_schema:5,rewrite:true},segments:[{index:0,start:0,seconds:15,director_plan:{mode:'story',event:'<Picture 1> performs <b>plain text</b>'}},{index:1,start:15,seconds:15,director_plan:{mode:'action',event:'The hero wins only here.'}}]};
     
     if(url==='api/mv/projects')return [{id:'saved123',title:'雲端歌曲',completed:1,total:2,status:'interrupted'}];
@@ -69,6 +90,29 @@ vm.runInContext(fs.readFileSync('banana_mv/web/clip_review.js','utf8'),context);
 const file=name=>({name,size:100,lastModified:1});
 async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault(){}});await vm.runInContext('poll()',context);return posts.at(-1);}
 (async()=>{
+  // Two separate controls must never be wired to one interrupt route.
+  vm.runInContext("active='running-stop-test';busy(true)",context);
+  assert.equal(els.stop.hidden,false);
+  assert.equal(els['stop-emergency'].hidden,false);
+  assert.equal(els.stop.disabled,false);
+  assert.equal(els['stop-emergency'].disabled,false);
+  await els.stop.onclick();
+  assert.deepEqual(gracefulStops,[{id:'running-stop-test'}]);
+  assert.equal(emergencyStops.length,0,'safe stop must not call emergency interrupt');
+  assert.equal(els.stop.disabled,true);
+  assert.equal(els['stop-emergency'].disabled,false,
+    'emergency must remain usable after a graceful stop request');
+  // The background initial-project restore can settle while an async
+  // mocked request is awaited; keep the test's selected running job fixed.
+  vm.runInContext("active='running-stop-test'",context);
+  await els['stop-emergency'].onclick();
+  assert.deepEqual(emergencyStops,[{id:'running-stop-test'}]);
+  assert.equal(gracefulStops.length,1,'emergency must not request graceful stop');
+  assert.equal(els['stop-emergency'].disabled,true);
+  assert(els['stop-feedback'].textContent.includes('立即中斷'));
+  vm.runInContext("active=null;busy(false)",context);
+  assert.equal(els.stop.hidden,true);
+  assert.equal(els['stop-emergency'].hidden,true);
   // A missing V4 supervisor must never silently hide the restart control.
   await vm.runInContext('updateRestartControl()',context);
   assert.equal(els['restart-5070'].hidden,false);
@@ -109,13 +153,34 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
   assert(html.includes('5070 連續模式：重拍 V2 後怎麼接？'));
   await els['copy-ai-guide'].onclick();
   const aiGuide=copied.at(-1);
-  for(const phrase of ['BANANAMV','@圖片1','先搓丹方','直接煉丹',
-                       '正式採用此版本','從本段尾幀續拍第 N+1 段',
-                       '合成正式新版全片','確認凝丹']){
-    assert(aiGuide.includes(phrase),'AI player guide is missing '+phrase);
+  for(const phrase of ['🍌 BANANAMV｜一鍵 AI 輔助新手教學',
+                        'THE BANANA TAKE｜RTX 5070 本機版',
+                        '一、你的工作範圍',
+                        '二、新手開始',
+                        '三、創作素材與圖片辨識',
+                        '四、歌曲與音樂理解',
+                        '五、故事導演',
+                        '六、電影攝影與分鏡規劃',
+                        '七、完整全咒的標準結構',
+                        '八、BANANAMV 前端操作教學',
+                        '九、生成結果檢查與回爐',
+                        '十、續跑與影片版本管理',
+                        '十一、AI 與使用者的合作規則',
+                        '十二、新手最簡單的開始方式',
+                        'AI 輸出完整 H3 控制詞',
+                        '「依此提示詞回爐這一段」',
+                        '「正式採用此版本」',
+                        '「續跑未完成段落」',
+                        '讓每個創意，都能拍成一部作品。']){
+    assert(aiGuide.includes(phrase),'The new AI guide is missing '+phrase);
   }
-  assert(aiGuide.includes('不要提供 GitHub、API、程式碼'));
-  assert(aiGuide.includes('不能直接操作我的網頁'));
+  assert(aiGuide.includes('不負責：'));
+  assert(aiGuide.includes('- 修改程式碼。'));
+  assert(aiGuide.includes('- 維修 Python 或 CUDA。'));
+  assert(aiGuide.includes('如果使用者要求 CODE BLOCK'));
+  assert(/<select id="segment"><option value="5"[^>]*>[^<]*<\/option><option value="10" selected>/.test(html),'5070 default clip length must be 10 seconds');
+  assert(/<select id="resolution"><option value="480p"[^>]*>[^<]*<\/option><option value="720p" selected>/.test(html),'5070 default render must be 720P');
+  assert(html.includes('<input id="width" type="number" value="1280" readonly'),'16:9 initial width must match 720P');
   assert(els['ai-guide-copy-status'].textContent.includes('已複製'));
   assert.equal(els['ai-guide-fallback-box'].hidden,true);
   const originalClipboard=context.navigator.clipboard;
@@ -440,6 +505,13 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
   assert.equal(els['recipe-review'].hidden,false);assert(els['recipe-text'].textContent.includes('15.00–30.00'));
   assert(els['recipe-text'].textContent.includes('@圖片1'));assert(els['recipe-text'].textContent.includes('<b>plain text</b>'));
   assert.equal(els.generate.disabled,false);assert.equal(els['plan-first'].disabled,false);assert.equal(els['approve-recipe'].disabled,false);
+  assert.equal(els['mobile-furnace-start'].textContent,'丹方無誤，開爐','ready plan must replace direct generate');
+  assert(html.includes('main>.card:nth-child(2){order:-1}'),'mobile saved projects must render before new MV setup');
+  mobileViewport.matches=true;vm.runInContext('arrangeRecipe()',context);
+  assert.equal(els['recipe-review'].insertPosition,undefined,'mobile recipe stays before the furnace without DOM reparenting');
+  assert.equal(els['recipe-plan-details'].open,false,'full recipe should default closed on phone');
+  vm.runInContext("renderEventPlan({id:'mobile-new-plan',segments:[{index:0,director_plan:{mode:'story',event:'A'}}]})",context);
+  assert.equal(els['event-plan-details'].open,false,'event details should default closed on phone');
   const translatedRecipe={id:'recipe123',status:'plan_ready',plan_revision:'r1',plan_preview_setup:'English source setup',segments:[{index:0,start:0,seconds:10,director_plan:{event:'English source event'}}],plan_translation:{status:'ready',source_plan_revision:'r1',blocks:{setup:'中文共通設定','0':'中文事件 <Picture 2>'}}};
   els['recipe-language'].value='zh';context.translatedRecipe=translatedRecipe;vm.runInContext('renderRecipe(translatedRecipe)',context);assert(els['recipe-text'].textContent.includes('中文事件 @圖片2'));assert(els['recipe-language-status'].textContent.includes('僅供審閱'));
   els['recipe-language'].value='en';els['recipe-language'].onchange();assert(els['recipe-text'].textContent.includes('English source event'));assert(!els['recipe-text'].textContent.includes('中文事件'));
@@ -447,8 +519,19 @@ async function submit(){uploads.length=0;await els.form.onsubmit({preventDefault
 
   assert.equal(els.stop.hidden,true);assert.equal(els['resume-project'].hidden,true);assert.equal(els['current-activity'].hidden,true);
   await vm.runInContext("openProject('recipe123')",context);assert.equal(els['recipe-review'].hidden,false);assert.equal(approvals.length,0);
-  await els['approve-recipe'].onclick();assert.deepEqual(approvals,[{id:'recipe123',revision:'recipe-v1'}]);
-  assert.equal(els['recipe-review'].hidden,true);await els['approve-recipe'].onclick();assert.equal(approvals.length,1);
+  const beforeApproval={posts:posts.length,uploads:uploads.length};
+  await els['mobile-furnace-start'].onclick();
+  assert.deepEqual(approvals,[{id:'recipe123',revision:'recipe-v1'}]);
+  assert.equal(posts.length,beforeApproval.posts,'confirm must NOT create a new MV');
+  assert.equal(uploads.length,beforeApproval.uploads,'confirm must NOT reupload song or references');
+  assert.equal(els['recipe-review'].hidden,true);
+  assert.equal(els['mobile-furnace-start'].textContent,'查看進度');
+  await els['mobile-furnace-start'].onclick();
+  assert.equal(els['progress-summary'].scrolled,true);
+  assert.equal(posts.length,beforeApproval.posts,'progress link must NOT create a new MV');
+  await els['approve-recipe'].onclick();assert.equal(approvals.length,1);
+  mobileViewport.matches=false;vm.runInContext('arrangeRecipe()',context);
+  assert.equal(els['recipe-review'].insertPosition,undefined,'desktop and mobile share the same review order');
   vm.runInContext('busy(false)',context);
   // The same browser/server instance may restore its selected project on F5.
   await vm.runInContext('restoreActiveProjectOnSameServer()',context);
