@@ -1,3 +1,34 @@
+# 🍌 BANANAMV 27B｜RTX 5070 F 槽獨立實驗片場
+
+**本分支只跑 Qwen3.5-27B GGUF Q4_K_M 導演，沒有 9B 切換，也不改 BANANAMV / BANANAFILM 成功版。**
+
+- 安裝目錄：`F:\AI\BANANAMV_27B_STUDIO`
+- 前端：`http://127.0.0.1:8195`；專用 H3 ComfyUI：`127.0.0.1:8218`；27B llama.cpp（按需起停）：`127.0.0.1:8217`
+- RTX 5070 12GB / 5800X3D / 64GB RAM：27B 部分 GPU offload，其餘系統 RAM，不能保證速度；H3 執行前確認 27B owned process 卸載。
+- 前端預設：**720P 1280×720、10 秒／段、末幀接續**；可自行改 480P 或 5 秒作診斷。
+- 一鍵安裝：`tools/install_27b.ps1`，可用配套 `Install_BANANAMV_27B.cmd` 啟動；自動建立資料夾、Git checkout、CUDA13 Python、獨立 Comfy/T8、llama.cpp CUDA13、音樂分析、8 個 HF 模型，僅重抓缺少或不完整的檔案。
+- 桌面啟動：自動建立「BANANAMV 27B」，或使用 `F:\AI\BANANAMV_27B_STUDIO\Launch_BANANAMV_27B.cmd`。
+- 日誌：`F:\AI\BANANAMV_27B_STUDIO\Logs`；作品：`F:\AI\BANANAMV_27B_STUDIO\Output`；專案：`F:\AI\BANANAMV_27B_STUDIO\Data`。
+
+### 實際模型下載清單
+
+| 用途 | 下載來源 |
+| --- | --- |
+| 27B 導演 | `unsloth/Qwen3.5-27B-GGUF / Qwen3.5-27B-Q4_K_M.gguf` |
+| 27B 多圖 | `unsloth/Qwen3.5-27B-GGUF / mmproj-BF16.gguf` |
+| H3 影像權重 | `OliviaRossi/Minimax-h3_Singularity-x-10Eros-Max_PRISM / Minimax-h3_Singularity_x_10Eros-Max_PRISM_int8.safetensors` |
+| H3 文字編碼 | `Comfy-Org/MiniMax-H3 / text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` |
+| H3 影片 VAE | `Comfy-Org/MiniMax-H3 / vae/minimax_h3_video_vae_int8_convrot.safetensors` |
+| H3 音訊 VAE | `Comfy-Org/MiniMax-H3 / vae/minimax_h3_audio_vae_fp32.safetensors` |
+| H3 Combat LoRA | `dseditor/minimax-h3-studio-assets / loras/H3_Combat_V2.safetensors` |
+| H3 Motion Repair LoRA | `dseditor/minimax-h3-studio-assets / loras/Motion_Repair.safetensors` |
+
+注意：除了 8 個模型，還會安裝 Python / Torch、ComfyUI、T8 音訊擴充、llama.cpp、CPU 音樂結構分析器及必要工具。初次安裝需要大容量 F 槽空間與穩定網路。安裝器能自動下載，不代表已通過 RTX 5070 完整影片生成驗收。
+
+**驗收順序**：安裝→CUDA13健康檢查→27B 雙圖片導演提示詞→27B 卸載→720P／10秒單段→兩段接續。若顯存不足，先用 480P／5秒確認環境。不要與原 BANANAMV、BANANAFILM 同時提交 GPU 任務。
+
+---
+
 # 🍌 Banana MV｜大乘蕉宗公開煉丹房
 
 ## Colab 版本辨識
