@@ -104,7 +104,7 @@ class PlanReviewTests(unittest.TestCase):
             server.start({'plan_review':True,'rewrite':False})
 
     def test_start_review_checks_only_rewriter_and_saves_review_mode(self):
-        self.cfg['rewriter']={'model':'local-9b'}
+        self.cfg['rewriter']={'model':'27b.gguf'}
         (self.root/'song.wav').write_bytes(b'song')
         def asset(key):
             return {'kind':'audio','file':'song.wav','name':'song'} if key=='song' else {
@@ -113,8 +113,8 @@ class PlanReviewTests(unittest.TestCase):
             try:
                 job=server.start(dict(self.req,image_ids=['image'],song_id='song',width=1280))
                 self.assertTrue(job['request']['plan_review'])
-                graph=server.preflight.call_args.args[1]
-                self.assertEqual({n['class_type'] for n in graph.values()},{'CLIPLoader','TextGenerate'})
+                # A 27B-only recipe review does not need an H3 ComfyUI graph.
+                server.preflight.assert_not_called()
                 self.assertEqual(thread.call_args.kwargs['target'],server.worker)
                 self.queue.assert_not_called()
             finally:
