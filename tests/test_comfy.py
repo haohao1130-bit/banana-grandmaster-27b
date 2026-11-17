@@ -46,14 +46,16 @@ class ComfyTests(unittest.TestCase):
             with tempfile.TemporaryDirectory() as tmp:
                 dest=Path(tmp)/'result.mp4';comfy.comfy_download(cfg,{'filename':'x.mp4'},dest)
                 self.assertEqual(dest.read_bytes(),b'video-bytes')
-            # Full local-rewriter HTTP path: successful text followed by an empty /free acknowledgement.
+            # 27B-only rewrite frees idle Comfy memory but sends all input to llama.cpp.
             from banana_mv import services
             from PIL import Image
             with tempfile.TemporaryDirectory() as tmp:
                 rewrite_cfg=services.load_config()
                 rewrite_cfg.update(comfy_url=cfg['comfy_url'],comfy_input_dir=tmp)
-                self.assertEqual(services.rewrite_local(rewrite_cfg,'guide',
-                    [('text','<Picture 1>'),('image',Image.new('RGB',(32,32),'red'))],'http-test'),'rewritten')
+                parts=[('text','<Picture 1>'),('image',Image.new('RGB',(32,32),'red'))]
+                with patch.object(services.llama27b,'generate',return_value='rewritten') as director:
+                    self.assertEqual(services.rewrite_local(rewrite_cfg,'guide',parts,'http-test'),'rewritten')
+                    director.assert_called_once_with(rewrite_cfg,'guide',parts,'http-test')
                 self.assertEqual(list(Path(tmp).glob('*.jpg')),[])
             with patch.object(comfy,'history_entry',return_value={'status':{'status_str':'error',
                 'messages':[['execution_error',{'node_type':'Test','exception_message':'bad tag'}]]}}):
