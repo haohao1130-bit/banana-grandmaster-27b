@@ -87,6 +87,15 @@ try {
         }
     }
     Write-Host "27B source: $((& git -C $App log -1 --oneline))"
+    # The director reads this required guide from App/guides at runtime.
+    # Gitignore already excludes the fetched file, preserving clean future Git pulls.
+    $guideDir = Join-Path $App 'guides'
+    $guide = Join-Path $guideDir 'VIDEO_PROMPT_WRITING_GUIDE_ref_en.md'
+    New-Item -ItemType Directory -Force -Path $guideDir | Out-Null
+    if (!(Test-Path $guide) -or (Get-Item $guide).Length -lt 1000) {
+        Invoke-WebRequest -UseBasicParsing -Uri 'https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md' -OutFile $guide
+        if ((Get-Item $guide).Length -lt 1000) { throw 'H3 official prompt guide is incomplete' }
+    }
     $python = Join-Path $Runtime 'venv\Scripts\python.exe'
     if (!(Test-Path $python)) {
         & $basePython -m venv (Join-Path $Runtime 'venv')
@@ -135,7 +144,7 @@ try {
     $yaml = Join-Path $Runtime 'extra_model_paths.yaml'
     $modelPath = (Join-Path $Models 'H3').Replace('\','/')
     $yamlText = "banana27b:`n  base_path: `"$modelPath`"`n  diffusion_models: diffusion_models`n  text_encoders: text_encoders`n  vae: vae`n  loras: loras`n"
-    [IO.File]::WriteAllText($yaml, $yamlText, (New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($yaml, $yamlText, (New-Object System.Text.UTF8Encoding($false)))
     $llamaFolder = Join-Path $Runtime 'llama.cpp'
     $llamaExe = Join-Path $llamaFolder 'llama-server.exe'
     if (!(Test-Path $llamaExe)) {
@@ -187,7 +196,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'RTX 5070 / CUDA13 GPU test failed; check NVIDIA driver' }
     $launchCmd = Join-Path $Root 'Launch_BANANAMV_27B.cmd'
     $launchText = "@echo off`r`nchcp 65001 >nul`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0App\tools\launch_27b.ps1`"`r`nif errorlevel 1 pause`r`n"
-    [IO.File]::WriteAllText($launchCmd,$launchText,(New-Object Text.UTF8Encoding($false)))
+    [IO.File]::WriteAllText($launchCmd,$launchText,(New-Object System.Text.UTF8Encoding($false)))
     try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'BANANAMV 27B.lnk'))
