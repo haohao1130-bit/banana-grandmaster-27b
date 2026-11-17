@@ -10,7 +10,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from banana_mv.comfy import comfy, queue_prompt, history_entry, execution_error, comfy_download, wait_prompt
+from banana_mv.comfy import comfy, queue_prompt as _comfy_queue_prompt, history_entry, execution_error, comfy_download, wait_prompt
+from banana_mv import llama27b
 from banana_mv.core import probe
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,9 +25,10 @@ DEFAULTS = {
     'comfy_input_dir': '/content/ComfyUI/input',
     'guides': {'ref': str(ROOT/'guides/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md')},
     'free_after_rewrite': True,
-    'rewriter': {'model': 'minimax_h3_rewriter_ref2va_qwen3.5_9b_w4a8.safetensors',
-                 'thinking': False, 'mtp': 'auto', 'max_length': 8192,
-                 'temperature': 0.4, 'top_p': 0.8, 'top_k': 20},
+    'rewriter': {'model': str(llama27b.DEFAULT_MODEL), 'mmproj': str(llama27b.DEFAULT_MMPROJ),
+                 'server': str(llama27b.DEFAULT_SERVER), 'port': 8217,
+                 'gpu_layers': 12, 'context': 8192, 'max_length': 4096,
+                 'temperature': 0.4, 'top_p': 0.8},
 }
 
 
@@ -114,80 +116,29 @@ def add_asset(cfg, filename, body):
         raise
 
 
-def build_rewrite_graph(cfg, system, parts, job_id):
-    """Use ComfyUI's native TextGenerate contract with the existing 9B settings."""
-    rw = cfg['rewriter']
-    contents = ''.join(value if kind == 'text' else '<|vision_start|><|image_pad|><|vision_end|>'
-                       for kind, value in parts)
-    chat = (f'<|im_start|>system\n{system}<|im_end|>\n<|im_start|>user\n'
-            f'{contents.strip()}<|im_end|>\n<|im_start|>assistant\n')
-    chat += '<think>\n' if rw['thinking'] else '<think>\n\n</think>\n\n'
-    graph = {'encoder': {'class_type': 'CLIPLoader', 'inputs': {
-        'clip_name': rw['model'], 'type': 'stable_diffusion', 'device': 'default'}}}
-    names, batch = [], None
-    inp = Path(cfg['comfy_input_dir']); inp.mkdir(parents=True, exist_ok=True)
-    try:
-        for index, (_, pic) in enumerate(part for part in parts if part[0]=='image'):
-            name = f'banana_rewrite_{job_id}_{index}.jpg'
-            names.append(name); pic.save(inp/name, quality=92)
-            key = f'picture_{index}'
-            graph[key] = {'class_type': 'LoadImage', 'inputs': {'image': name}}
-            if batch is None:
-                batch = [key, 0]
-            else:
-                merged = f'batch_{index}'
-                graph[merged] = {'class_type': 'ImageBatch', 'inputs': {'image1': batch, 'image2': [key, 0]}}
-                batch = [merged, 0]
-        inputs = {'clip': ['encoder', 0], 'prompt': chat, 'max_length': int(rw['max_length']),
-                  'sampling_mode': 'on', 'sampling_mode.temperature': float(rw['temperature']),
-                  'sampling_mode.top_k': int(rw['top_k']), 'sampling_mode.top_p': float(rw['top_p']),
-                  'sampling_mode.min_p': 0.0, 'sampling_mode.repetition_penalty': 1.0,
-                  'sampling_mode.seed': random.randint(0, 2**31-1), 'sampling_mode.presence_penalty': 0.0,
-                  'thinking': bool(rw['thinking']), 'use_default_template': True, 'mtp': rw['mtp']}
-        if batch is not None:
-            inputs['image'] = batch
-        graph['generate'] = {'class_type': 'TextGenerate', 'inputs': inputs}
-        graph['result'] = {'class_type': 'PreviewAny', 'inputs': {'source': ['generate', 0]}}
-        return graph, names
-    except Exception:
-        for name in names:
-            (inp/name).unlink(missing_ok=True)
-        raise
-
-
-_REWRITE_PROMPT_LOCK = threading.Lock()
-_REWRITE_PROMPT_ID = None
-
-
 def active_rewrite_prompt_id():
-    """The 9B prompt currently owned by this BANANAMV process."""
-    with _REWRITE_PROMPT_LOCK:
-        return _REWRITE_PROMPT_ID
+    """27B requests are owned by llama.cpp, not ComfyUI prompt IDs."""
+    return None
+
+
+def cancel_27b():
+    llama27b.stop(cancel=True)
+
+
+def release_27b():
+    """Required memory handoff before *every* H3 job, even when resuming."""
+    llama27b.stop()
+
+
+def queue_prompt(cfg, graph):
+    """Comfy entrypoint: free the exclusive 27B worker before H3 sampling."""
+    release_27b()
+    return _comfy_queue_prompt(cfg, graph)
 
 
 def rewrite_local(cfg, system, parts, job_id):
-    graph, names = build_rewrite_graph(cfg, system, parts, job_id)
-    entry = None
-    prompt_id = None
-    global _REWRITE_PROMPT_ID
-    try:
-        prompt_id = queue_prompt(cfg, graph)
-        with _REWRITE_PROMPT_LOCK:
-            _REWRITE_PROMPT_ID = prompt_id
-        entry = wait_prompt(cfg, prompt_id)
-        values = entry.get('outputs', {}).get('result', {}).get('text', [])
-        text = values if isinstance(values, str) else ''.join(values)
-        if not text.strip():
-            raise ValueError('本地 9B 改寫回傳空白。')
-        return text.strip()
-    finally:
-        with _REWRITE_PROMPT_LOCK:
-            if prompt_id is not None and _REWRITE_PROMPT_ID == prompt_id:
-                _REWRITE_PROMPT_ID = None
-        for name in names:
-            (Path(cfg['comfy_input_dir'])/name).unlink(missing_ok=True)
-        if entry is not None and cfg.get('free_after_rewrite', True):
-            comfy(cfg, '/free', {'unload_models': True, 'free_memory': True})
+    """This branch only runs the 27B vision GGUF model; never falls back to 9B."""
+    return llama27b.generate(cfg, system, parts, job_id)
 
 
 def upload_comfy_image(cfg, name, data, content_type):
