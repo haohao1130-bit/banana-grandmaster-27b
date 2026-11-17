@@ -137,7 +137,10 @@ def queue_prompt(cfg, graph):
 
 
 def rewrite_local(cfg, system, parts, job_id):
-    """This branch only runs the 27B vision GGUF model; never falls back to 9B."""
+    """Unload Comfy H3 caches before 27B; never fall back to 9B."""
+    # The previous H3 clip can leave weights cached in the *other* GPU process.
+    # /free is a Comfy-owned request; it does not kill or unload our llama worker.
+    comfy(cfg, '/free', {'unload_models': True, 'free_memory': True})
     return llama27b.generate(cfg, system, parts, job_id)
 
 
