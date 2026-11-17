@@ -929,11 +929,13 @@ def start(req):
     # Fail invalid image mentions before queueing any rewrite or GPU work.
     fallback_prompt(req['prompt'], False, '', len(images))
     images_comfy = [img['comfy_name'] for img in images]
-    # 27B runs as a separate GGUF worker; ComfyUI preflight checks H3 only.
-    graph = build_workflow(images_comfy,'preflight.wav',*size,plan[0]['model_frames'],'',seed,
-                           **graph_options(req,plan[0]['seconds']))
-    preflight(cfg,graph)
-    preflight_five_frame(cfg, req, images_comfy, size, plan[0], seed)
+    # Plan-only reviews need the external GGUF director, not an H3 sampling graph.
+    # Actual H3 graphs are preflighted when the user approves the plan / opens the furnace.
+    if not (req['plan_review'] and req.get('rewrite', True)):
+        graph = build_workflow(images_comfy,'preflight.wav',*size,plan[0]['model_frames'],'',seed,
+                               **graph_options(req,plan[0]['seconds']))
+        preflight(cfg,graph)
+        preflight_five_frame(cfg, req, images_comfy, size, plan[0], seed)
     if not GPU_LOCK.acquire(blocking=False):
         raise ValueError('已有 MV 工作執行中，請等它完成。')
     try:
