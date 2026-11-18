@@ -218,8 +218,11 @@ try {
     Write-Host 'Downloading all eight required model files (resumable, no 9B)...'
     & $python (Join-Path $App 'tools\install_27b_models.py') --models-root $Models
     if ($LASTEXITCODE -ne 0) { throw 'Model download did not complete; rerun installer to resume' }
-    & $python -c 'import torch; print("Torch", torch.__version__, "CUDA", torch.version.cuda); assert torch.cuda.is_available(); assert str(torch.version.cuda).startswith("13")'
-    if ($LASTEXITCODE -ne 0) { throw 'RTX 5070 / CUDA13 GPU test failed; check NVIDIA driver' }
+    # Run a real file instead of inline python -c: PowerShell 5.1 strips nested
+    # double quotes, turning print("Torch") into print(Torch) and causing NameError.
+    Write-Host 'Checking isolated RTX 5070 CUDA 13 PyTorch runtime...'
+    & $python (Join-Path $App 'tools\check_cuda27b.py')
+    if ($LASTEXITCODE -ne 0) { throw '27B CUDA13 smoke test failed; inspect the Python output above before changing drivers.' }
     $launchCmd = Join-Path $Root 'Launch_BANANAMV_27B.cmd'
     $launchText = "@echo off`r`nchcp 65001 >nul`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0App\tools\launch_27b.ps1`"`r`nif errorlevel 1 pause`r`n"
     [IO.File]::WriteAllText($launchCmd,$launchText,(New-Object System.Text.UTF8Encoding($false)))
