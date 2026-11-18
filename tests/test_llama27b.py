@@ -37,12 +37,12 @@ class Llama27BTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "port"):
             llama27b._settings({"rewriter": {"port": 80}})
 
-    def test_gpu_auto_fit_is_default_and_keeps_32k(self):
+    def test_35_layer_gpu_target_is_default_and_keeps_32k(self):
         settings = llama27b._settings({"rewriter": {"port": 8217}})
-        self.assertEqual(settings["gpu_layers"], "auto")
+        self.assertEqual(settings["gpu_layers"], 35)
         self.assertEqual(settings["context"], 32768)
         argv = llama27b._launch_args(settings)
-        self.assertEqual(argv[argv.index("-ngl") + 1], "auto")
+        self.assertEqual(argv[argv.index("-ngl") + 1], "35")
         self.assertEqual(argv[argv.index("-c") + 1], "32768")
         self.assertEqual(argv[argv.index("-fit") + 1], "on")
         self.assertEqual(argv[argv.index("-fitt") + 1], "1024")
@@ -52,7 +52,7 @@ class Llama27BTests(unittest.TestCase):
 
     def test_custom_gpu_layer_cap_preserved(self):
         self.assertEqual(llama27b._gpu_layers(25), 25)
-        self.assertEqual(llama27b._gpu_layers("auto"), "auto")
+        self.assertEqual(llama27b._gpu_layers("auto"), 35)
         with self.assertRaisesRegex(ValueError, "gpu_layers"):
             llama27b._gpu_layers(-1)
         with self.assertRaisesRegex(ValueError, "gpu_layers"):
