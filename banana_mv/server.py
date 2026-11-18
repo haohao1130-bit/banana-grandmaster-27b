@@ -1244,6 +1244,8 @@ def resume(job_id,rewrite_retries=None):
 class Handler(WebHandler):
     def do_GET(self):
         if self.path == '/api/5070/switch':
+            if os.environ.get('BANANA_27B_STANDALONE') == '1':
+                return self.send_json({'available': False, 'busy': GPU_LOCK.locked()})
             from banana_mv.room_switch import launcher
             return self.send_json({'available': bool(launcher('film', backend.PORT)),
                                    'busy': GPU_LOCK.locked()})
@@ -1302,6 +1304,8 @@ class Handler(WebHandler):
 
     def do_POST(self):
         if self.path == '/api/5070/switch':
+            if os.environ.get('BANANA_27B_STANDALONE') == '1':
+                return self.send_json({'error':'27B 為獨立測試片場，不支援切換到另一座丹爐。'},400)
             from banana_mv.room_switch import switch
             return switch(self, 'film', backend, GPU_LOCK)
         path=urllib.parse.urlparse(self.path).path
