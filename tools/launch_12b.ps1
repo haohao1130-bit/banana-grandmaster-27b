@@ -6,18 +6,28 @@ $ErrorActionPreference = 'Stop'
 $Root = [System.IO.Path]::GetFullPath($Root)
 $app = Join-Path $Root 'App'
 $runtime = Join-Path $Root 'Runtime'
-$comfy = Join-Path $runtime 'ComfyUI'
-$python = Join-Path $runtime 'venv\Scripts\python.exe'
+$sharedFile = Join-Path $runtime 'shared_5070.json'
+if (!(Test-Path -LiteralPath $sharedFile)) {
+    throw '12B shared 5070 runtime inventory missing. Run Install_BANANAMV_12B.cmd.'
+}
+$shared = Get-Content -Raw -LiteralPath $sharedFile | ConvertFrom-Json
+$comfy = [string]$shared.comfy
+$python = [string]$shared.python
+$musicPython = [string]$shared.music_python
+$llama = [string]$shared.llama
+$ffmpegBin = [string]$shared.ffmpeg_bin
 $models = Join-Path $Root 'Models'
 $data = Join-Path $Root 'Data'
 $logs = Join-Path $Root 'Logs'
 $out = Join-Path $Root 'Output'
+$inputDir = Join-Path $runtime 'ComfyInput'
+$tempDir = Join-Path $runtime 'ComfyTemp'
 $yaml = Join-Path $runtime 'extra_model_paths.yaml'
-# Portable FFmpeg comes from this studio's installer, never rely on winget PATH.
-$ffmpegBin = Join-Path $runtime 'ffmpeg\bin'
-if (!(Test-Path (Join-Path $ffmpegBin 'ffmpeg.exe')) -or
-    !(Test-Path (Join-Path $ffmpegBin 'ffprobe.exe'))) {
-    throw "12B FFmpeg runtime missing. Rerun Install_BANANAMV_12B.cmd."
+foreach ($required in @($python,$musicPython,$llama,(Join-Path $comfy 'main.py'),
+                         (Join-Path $ffmpegBin 'ffmpeg.exe'),(Join-Path $ffmpegBin 'ffprobe.exe'),$yaml)) {
+    if (!(Test-Path -LiteralPath $required -PathType Leaf)) {
+        throw "Shared 5070 dependency was moved or removed: $required"
+    }
 }
 $env:PATH = "$ffmpegBin;$env:PATH"
 # The phone/Tailscale frontend is fixed to 8193, matching existing 5070 URLs.
@@ -35,7 +45,7 @@ try {
     $portCheck.Close()
 }
 if (!(Test-Path -LiteralPath $python)) { throw "12B Python missing: $python. Run Install_BANANAMV_12B.cmd." }
-if (!(Test-Path -LiteralPath (Join-Path $comfy 'main.py'))) { throw 'Independent ComfyUI missing; run installer.' }
+if (!(Test-Path -LiteralPath (Join-Path $comfy 'main.py'))) { throw 'Shared 5070 ComfyUI missing; rerun installer.' }
 # Safe one-click startup update. Never reset local edits or switch branches.
 # If a new launcher is downloaded, reload the new script before any service
 # starts; otherwise PowerShell would continue running its old in-memory version.
@@ -75,21 +85,15 @@ $env:BANANA_12B_STANDALONE = '1'
 $env:BANANA_SUPERVISED_RESTART = '0'
 $env:BANANA_FINISHED_VIDEOS = $out
 $env:BANANA_12B_ROOT = $Root
-$env:BANANA_12B_SERVER = (Join-Path $runtime 'llama.cpp\llama-server.exe')
+$env:BANANA_12B_SERVER = $llama
 $env:BANANA_12B_MODEL = (Join-Path $models '12B\google_gemma-3-12b-it-Q5_K_M.gguf')
 $env:BANANA_12B_MMPROJ = (Join-Path $models '12B\mmproj-google_gemma-3-12b-it-f16.gguf')
 $env:BANANA_12B_PORT = '8217'
-$env:BANANA_MUSIC_PYTHON = (Join-Path $runtime 'music-venv\Scripts\python.exe')
+$env:BANANA_MUSIC_PYTHON = $musicPython
 $env:HF_HOME = (Join-Path $Root 'Cache\huggingface')
 $mustHave = @(
   '12B\google_gemma-3-12b-it-Q5_K_M.gguf',
-  '12B\mmproj-google_gemma-3-12b-it-f16.gguf',
-  'H3\diffusion_models\Minimax-h3_Singularity_x_10Eros-Max_PRISM_int8.safetensors',
-  'H3\text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
-  'H3\vae\minimax_h3_video_vae_int8_convrot.safetensors',
-  'H3\vae\minimax_h3_audio_vae_fp32.safetensors',
-  'H3\loras\H3_Combat_V2.safetensors',
-  'H3\loras\Motion_Repair.safetensors'
+  '12B\mmproj-google_gemma-3-12b-it-f16.gguf'
 )
 if (@($mustHave | Where-Object { !(Test-Path -LiteralPath (Join-Path $models $_)) }).Count -gt 0) {
     Write-Host 'Missing model file detected; downloading and repairing model inventory...'
@@ -97,7 +101,7 @@ if (@($mustHave | Where-Object { !(Test-Path -LiteralPath (Join-Path $models $_)
     if ($LASTEXITCODE -ne 0) { throw 'Model repair failed; rerun installer.' }
 }
 $configFile = Join-Path $data 'config.json'
-$config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=(Join-Path $comfy 'input');
+$config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=$inputDir;
              free_after_rewrite=$true;
              rewriter=@{ model=$env:BANANA_12B_MODEL; mmproj=$env:BANANA_12B_MMPROJ;
                          server=$env:BANANA_12B_SERVER; port=8217; gpu_layers=99;
@@ -121,7 +125,8 @@ if ($existingComfy) {
     $ownerPid = [int]$existingComfy.OwningProcess
     $ownerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
     if (!$ownerProcess -or !$ownerProcess.CommandLine -or
-        $ownerProcess.CommandLine.IndexOf($comfy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        $ownerProcess.CommandLine.IndexOf($comfy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+        $ownerProcess.CommandLine.IndexOf($Root, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
         throw "Port 8218 belongs to a different ComfyUI/process (PID $ownerPid). Close the old studio first; nothing was terminated."
     }
 }
@@ -129,9 +134,13 @@ try {
     $nodes = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/object_info' -TimeoutSec 4
 } catch {
     Write-Host 'Starting independent H3 ComfyUI on 8218 ...'
+    foreach ($folder in @($inputDir,$tempDir,$out)) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }
     $comfyArgs = @('-u', ('"' + (Join-Path $comfy 'main.py') + '"'),
                    '--base-directory', ('"' + $comfy + '"'),
                    '--extra-model-paths-config', ('"' + $yaml + '"'),
+                   '--input-directory', ('"' + $inputDir + '"'),
+                   '--output-directory', ('"' + $out + '"'),
+                   '--temp-directory', ('"' + $tempDir + '"'),
                    '--listen','127.0.0.1','--port','8218','--lowvram','--preview-method','none')
     $proc = Start-Process -FilePath $python -ArgumentList $comfyArgs -WorkingDirectory $comfy -PassThru -RedirectStandardOutput (Join-Path $logs 'comfy.stdout.log') -RedirectStandardError (Join-Path $logs 'comfy.stderr.log')
     $deadline = (Get-Date).AddMinutes(5)
@@ -147,7 +156,7 @@ if (!$nodes) { throw 'Independent ComfyUI did not start; see Logs.' }
 foreach ($node in @('MiniMaxH3AudioConditioningT8','CLIPLoader','UNETLoader','ModelAttentionBackend')) {
     if (!$nodes.PSObject.Properties[$node]) { throw "H3 missing required node: $node. Run installer." }
 }
-Write-Host 'Independent H3 ComfyUI: http://127.0.0.1:8218'
+Write-Host 'Shared original 5070 ComfyUI code, 12B listener: http://127.0.0.1:8218'
 Write-Host '12B Director: owned process on port 8217, launched on demand.'
 Write-Host 'BANANAMV 12B: http://127.0.0.1:8193'
 if (!$NoBrowser) { Start-Process 'http://127.0.0.1:8193' }
