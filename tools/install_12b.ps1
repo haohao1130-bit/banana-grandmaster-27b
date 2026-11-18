@@ -2,319 +2,174 @@ param([string]$Root = 'F:\BANANAMV_12B_STUDIO')
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+
+# Thin installation: only a new App checkout, per-studio data and Gemma models.
+# The already working 27B studio owns the shared CUDA13, ComfyUI/H3 and music runtimes.
 $Root = [System.IO.Path]::GetFullPath($Root)
-if (!$Root.StartsWith('F:\',[System.StringComparison]::OrdinalIgnoreCase)) {
-    throw 'The 12B independent studio must be installed on F:; no other drive will be modified.'
+$SharedRoot = 'F:\AI\BANANAMV_27B_STUDIO'
+if (!$Root.StartsWith('F:\', [System.StringComparison]::OrdinalIgnoreCase) -or
+    $Root.TrimEnd('\') -ieq 'F:' -or
+    $Root -like 'F:\AI\BANANAMV_27B_STUDIO*') {
+    throw '12B must install under its own F: directory, never into the existing 27B studio.'
 }
-if (!(Test-Path 'F:\')) { throw 'F: does not exist. Connect the F: SSD first.' }
-if ($Root -ieq 'F:\') { throw 'Install into F:\BANANAMV_12B_STUDIO, never directly into F:\ root.' }
-if ($Root -like 'F:\AI\BANANAMV_27B_STUDIO*') { throw 'Refusing to overwrite existing 27B installation.' }
 $App = Join-Path $Root 'App'
-$Runtime = Join-Path $Root 'Runtime'
 $Models = Join-Path $Root 'Models'
 $Logs = Join-Path $Root 'Logs'
 $Data = Join-Path $Root 'Data'
 $Output = Join-Path $Root 'Output'
 $Cache = Join-Path $Root 'Cache'
-foreach ($dir in @($Root,$Runtime,$Models,$Logs,$Data,$Output,$Cache)) {
+$LocalRuntime = Join-Path $Root 'Runtime'
+$SharedRuntime = Join-Path $SharedRoot 'Runtime'
+$SharedComfy = Join-Path $SharedRuntime 'ComfyUI'
+$SharedH3 = Join-Path $SharedRoot 'Models\H3'
+$Python = Join-Path $SharedRuntime 'venv\Scripts\python.exe'
+$MusicPython = Join-Path $SharedRuntime 'music-venv\Scripts\python.exe'
+$Llama = Join-Path $SharedRuntime 'llama.cpp\llama-server.exe'
+
+foreach ($dir in @($Root,$Models,$Logs,$Data,$Output,$Cache,$LocalRuntime)) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
 }
 $env:HF_HOME = Join-Path $Cache 'huggingface'
 $env:HF_HUB_ENABLE_HF_TRANSFER = '0'
 Start-Transcript -Path (Join-Path $Logs 'install_12b.log') -Append | Out-Null
 try {
-    function Refresh-Path {
-        $env:PATH = [Environment]::GetEnvironmentVariable('PATH','Machine')+';'+[Environment]::GetEnvironmentVariable('PATH','User')+';'+$env:PATH
+    Write-Host '12B thin install: reusing the existing F:\AI 27B runtime and H3 weights.'
+    if (!(Get-Command git -ErrorAction SilentlyContinue)) { throw 'Git not found on PATH; the original studio Git is required.' }
+
+    # Do not touch or repair existing Python, CUDA, ComfyUI, H3 or music packages.
+    $required = @(
+        $Python,
+        $MusicPython,
+        $Llama,
+        (Join-Path $SharedComfy 'main.py'),
+        (Join-Path $SharedH3 'diffusion_models\Minimax-h3_Singularity_x_10Eros-Max_PRISM_int8.safetensors'),
+        (Join-Path $SharedH3 'text_encoders\qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'),
+        (Join-Path $SharedH3 'vae\minimax_h3_video_vae_int8_convrot.safetensors'),
+        (Join-Path $SharedH3 'vae\minimax_h3_audio_vae_fp32.safetensors'),
+        (Join-Path $SharedH3 'loras\H3_Combat_V2.safetensors'),
+        (Join-Path $SharedH3 'loras\Motion_Repair.safetensors')
+    )
+    foreach ($file in $required) {
+        if (!(Test-Path -LiteralPath $file -PathType Leaf) -or
+            (Get-Item -LiteralPath $file).Length -eq 0) {
+            throw "Missing shared 5070 asset: $file. Existing studio was not modified."
+        }
     }
-    function Require-Tool([string]$Name, [string]$WingetId) {
-        if (Get-Command $Name -ErrorAction SilentlyContinue) { return }
-        if (!(Get-Command winget -ErrorAction SilentlyContinue)) {
-            throw "Missing $Name and Windows winget. Install Windows App Installer and rerun."
-        }
-        Write-Host "Installing missing prerequisite: $WingetId"
-        & winget install --exact --id $WingetId --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-        if ($LASTEXITCODE -ne 0) { throw "winget failed: $WingetId" }
-        Refresh-Path
-        if (!(Get-Command $Name -ErrorAction SilentlyContinue)) {
-            throw "$Name was installed but not found on PATH. Restart terminal and rerun installer."
-        }
+    $devices = (& $Llama --list-devices 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $devices -notmatch 'CUDA0:') {
+        throw "Shared llama.cpp CUDA13 failed GPU detection: $devices"
     }
-    Require-Tool 'git' 'Git.Git'
-    # Winget returns a nonzero "no upgrade available" code when Gyan.FFmpeg
-    # is already installed but ffmpeg is not visible in this PowerShell PATH.
-    # Do not use winget for FFmpeg: stage both tools inside this 12B runtime.
-    $ffmpegBin = Join-Path $Runtime 'ffmpeg\\bin'
-    $localFFmpeg = Join-Path $ffmpegBin 'ffmpeg.exe'
-    $localFFprobe = Join-Path $ffmpegBin 'ffprobe.exe'
-    New-Item -ItemType Directory -Force -Path $ffmpegBin | Out-Null
-    if (!(Test-Path $localFFmpeg) -or !(Test-Path $localFFprobe)) {
-        $sourceDir = $null
-        $cmdFFmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
-        if ($cmdFFmpeg -and (Test-Path -LiteralPath (Join-Path (Split-Path $cmdFFmpeg.Source) 'ffprobe.exe'))) {
-            $sourceDir = Split-Path $cmdFFmpeg.Source
+    Write-Host ($devices.Trim())
+    & $Python -c 'import huggingface_hub, PIL, torch; print("Shared Python libraries: OK")'
+    if ($LASTEXITCODE -ne 0) { throw 'The existing 27B Python venv lacks required packages. No shared packages were changed.' }
+
+    # Locate the installed FFmpeg/ffprobe pair. Winget may report "installed"
+    # but not export their locations into the current Windows PATH.
+    function Find-FFmpegBin {
+        $exe = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+        if ($exe -and $exe.Source) {
+            $dir = Split-Path -Parent $exe.Source
+            if (Test-Path -LiteralPath (Join-Path $dir 'ffprobe.exe')) { return $dir }
         }
-        if (!$sourceDir) {
-            # An installed winget package may not have exported PATH aliases.
-            $wingetRoots = @(
-                (Join-Path $env:LOCALAPPDATA 'Microsoft\\WinGet\\Packages'),
-                (Join-Path $env:ProgramFiles 'WinGet\\Packages')
-            )
-            foreach ($packageRoot in $wingetRoots) {
-                if (!$packageRoot -or !(Test-Path $packageRoot)) { continue }
-                $matches = @(Get-ChildItem -LiteralPath $packageRoot -Filter 'ffmpeg.exe' -Recurse -File -ErrorAction SilentlyContinue |
-                    Where-Object { $_.DirectoryName -match 'Gyan\\.FFmpeg' -or $_.DirectoryName -match 'ffmpeg' } |
-                    Select-Object -First 5)
-                foreach ($entry in $matches) {
-                    if (Test-Path -LiteralPath (Join-Path $entry.DirectoryName 'ffprobe.exe')) {
-                        $sourceDir = $entry.DirectoryName
-                        break
-                    }
-                }
-                if ($sourceDir) { break }
-            }
-        }
-        if ($sourceDir) {
-            Write-Host "Using existing FFmpeg files from $sourceDir"
-            Copy-Item -LiteralPath (Join-Path $sourceDir 'ffmpeg.exe') -Destination $localFFmpeg -Force
-            Copy-Item -LiteralPath (Join-Path $sourceDir 'ffprobe.exe') -Destination $localFFprobe -Force
-        } else {
-            # Self-contained fallback: no system PATH edits or winget upgrade.
-            Write-Host 'FFmpeg not on PATH; downloading portable FFmpeg to this studio only...'
-            $zip = Join-Path $Cache 'ffmpeg-release-essentials.zip'
-            if (!(Test-Path $zip) -or (Get-Item $zip).Length -lt 1000000) {
-                $partial = "$zip.partial"
-                Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
-                Invoke-WebRequest -UseBasicParsing -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $partial
-                if ((Get-Item $partial).Length -lt 1000000) { throw 'Portable FFmpeg download incomplete' }
-                Move-Item -LiteralPath $partial -Destination $zip -Force
-            }
-            $unpack = Join-Path $Cache 'ffmpeg-extract'
-            if (Test-Path $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
-            Expand-Archive -LiteralPath $zip -DestinationPath $unpack -Force
-            $candidate = Get-ChildItem -LiteralPath $unpack -Filter 'ffmpeg.exe' -Recurse -File |
+        $candidates = @(
+            'F:\AI\Tools',
+            'F:\AI\NVEncC',
+            (Join-Path $SharedRuntime 'ffmpeg'),
+            (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages'),
+            (Join-Path $env:ProgramFiles 'WinGet\Packages'),
+            (Join-Path $env:ProgramFiles 'ffmpeg'),
+            'C:\ffmpeg'
+        )
+        foreach ($base in $candidates) {
+            if (!$base -or !(Test-Path -LiteralPath $base)) { continue }
+            $match = Get-ChildItem -LiteralPath $base -Filter 'ffmpeg.exe' -File -Recurse -ErrorAction SilentlyContinue |
                 Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName 'ffprobe.exe') } |
                 Select-Object -First 1
-            if (!$candidate) { throw 'Portable FFmpeg archive missing ffmpeg.exe/ffprobe.exe pair' }
-            Copy-Item -LiteralPath $candidate.FullName -Destination $localFFmpeg -Force
-            Copy-Item -LiteralPath (Join-Path $candidate.DirectoryName 'ffprobe.exe') -Destination $localFFprobe -Force
-            Remove-Item -LiteralPath $unpack -Recurse -Force
-        }
-    }
-    if (!(Test-Path $localFFmpeg) -or !(Test-Path $localFFprobe)) {
-        throw 'Cannot provision isolated ffmpeg and ffprobe binaries.'
-    }
-    $env:PATH = "$ffmpegBin;$env:PATH"
-    & $localFFmpeg -version | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0) { throw 'Isolated ffmpeg.exe validation failed' }
-    & $localFFprobe -version | Select-Object -First 1
-    if ($LASTEXITCODE -ne 0) { throw 'Isolated ffprobe.exe validation failed' }
-    function Python312 {
-        if (Get-Command py -ErrorAction SilentlyContinue) {
-            $p = (& py -3.12 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -Last 1)
-            if ($LASTEXITCODE -eq 0 -and $p -and (Test-Path -LiteralPath $p)) { return $p }
-        }
-        foreach ($candidate in @(
-          (Join-Path $env:LOCALAPPDATA 'Programs\Python\Python312\python.exe'),
-          (Join-Path $env:ProgramFiles 'Python312\python.exe'))) {
-            if (Test-Path $candidate) { return $candidate }
+            if ($match) { return $match.DirectoryName }
         }
         return $null
     }
-    $basePython = Python312
-    if (!$basePython) {
-        if (!(Get-Command winget -ErrorAction SilentlyContinue)) { throw 'Python 3.12 missing; Windows winget unavailable' }
-        & winget install --exact --id Python.Python.3.12 --silent --accept-package-agreements --accept-source-agreements --disable-interactivity
-        if ($LASTEXITCODE -ne 0) { throw 'Could not install Python 3.12' }
-        Refresh-Path
-        $basePython = Python312
-        if (!$basePython) { throw 'Python 3.12 installed, but cannot locate python.exe. Rerun after logging in.' }
+    $FFmpegBin = Find-FFmpegBin
+    if (!$FFmpegBin) {
+        throw 'FFmpeg is installed according to winget but its binaries could not be located. Run: Get-Command ffmpeg -All; where.exe ffmpeg. No FFmpeg download was attempted.'
     }
+    $env:PATH = "$FFmpegBin;$env:PATH"
+    [IO.File]::WriteAllText((Join-Path $LocalRuntime 'ffmpeg_path.txt'), $FFmpegBin,
+        (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Reusing existing FFmpeg: $FFmpegBin"
+
     $branch = 'experiment/rtx5070-gemma3-12b'
     $gitUrl = 'https://github.com/haohao1130-bit/banana-grandmaster-27b.git'
     if (!(Test-Path -LiteralPath (Join-Path $App '.git'))) {
-        if ((Test-Path $App) -and @(Get-ChildItem -LiteralPath $App -Force).Count) {
-            throw "App exists but is not a Git checkout; refusing to overwrite: $App"
+        if ((Test-Path -LiteralPath $App) -and @(Get-ChildItem -LiteralPath $App -Force).Count -gt 0) {
+            throw "12B App is nonempty but not a Git checkout: $App"
         }
         & git clone --single-branch --branch $branch $gitUrl $App
-        if ($LASTEXITCODE -ne 0) { throw 'Cannot clone 12B studio branch' }
+        if ($LASTEXITCODE -ne 0) { throw '12B branch clone failed.' }
     } else {
         $remote = (& git -C $App remote get-url origin).Trim()
         if ($remote -notlike '*haohao1130-bit/banana-grandmaster-27b*') {
-            throw "App checkout points at a different Git repository: $remote"
+            throw "12B App has unexpected Git remote: $remote"
         }
+        $current = (& git -C $App branch --show-current).Trim()
+        if ($current -ne $branch) { throw "Refusing to change existing App branch: $current" }
         $dirty = & git -C $App status --porcelain
-        if ($dirty) {
-            Write-Warning 'App contains local edits; keeping installed version without pulling. Never force reset.'
-        } else {
-            & git -C $App fetch origin $branch
-            if ($LASTEXITCODE -ne 0) { throw 'Git fetch failed' }
-            $current = (& git -C $App branch --show-current).Trim()
-            if ($current -ne $branch) { throw "App is on a different branch: $current. Refusing to switch automatically." }
+        if (!$dirty) {
             & git -C $App pull --ff-only origin $branch
-            if ($LASTEXITCODE -ne 0) { throw 'Git branch diverged; no reset performed' }
+            if ($LASTEXITCODE -ne 0) { throw '12B Git fast-forward failed; no reset was attempted.' }
+        } else {
+            Write-Warning 'Local App edits found; skipping automatic update, no reset.'
         }
     }
     Write-Host "12B source: $((& git -C $App log -1 --oneline))"
-    # The director reads this required guide from App/guides at runtime.
-    # Gitignore already excludes the fetched file, preserving clean future Git pulls.
-    $guideDir = Join-Path $App 'guides'
-    $guide = Join-Path $guideDir 'VIDEO_PROMPT_WRITING_GUIDE_ref_en.md'
-    New-Item -ItemType Directory -Force -Path $guideDir | Out-Null
+
+    # The H3 writing guide is already present in the existing 27B studio.
+    $guide = Join-Path $App 'guides\VIDEO_PROMPT_WRITING_GUIDE_ref_en.md'
     if (!(Test-Path $guide) -or (Get-Item $guide).Length -lt 1000) {
-        Invoke-WebRequest -UseBasicParsing -Uri 'https://huggingface.co/MiniMaxAI/MiniMax-H3/resolve/main/docs/VIDEO_PROMPT_WRITING_GUIDE_ref_en.md' -OutFile $guide
-        if ((Get-Item $guide).Length -lt 1000) { throw 'H3 official prompt guide is incomplete' }
-    }
-    $python = Join-Path $Runtime 'venv\Scripts\python.exe'
-    if (!(Test-Path $python)) {
-        & $basePython -m venv (Join-Path $Runtime 'venv')
-        if ($LASTEXITCODE -ne 0) { throw 'Could not create independent venv' }
-    }
-    & $python -m pip install --upgrade pip
-    if ($LASTEXITCODE -ne 0) { throw 'pip bootstrap failed' }
-    # Install CUDA13 runtime in our isolated environment; do not touch the other two studios.
-    & $python -m pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu130
-    if ($LASTEXITCODE -ne 0) { throw 'CUDA 13 PyTorch install failed' }
-    $comfy = Join-Path $Runtime 'ComfyUI'
-    if (!(Test-Path -LiteralPath (Join-Path $comfy '.git'))) {
-        & git clone https://github.com/Comfy-Org/ComfyUI.git $comfy
-        if ($LASTEXITCODE -ne 0) { throw 'ComfyUI clone failed' }
-    }
-    # Reuse the tested H3 source revision used in the original Banana runtime.
-    $comfyPin = '56f179f6c50dad0c4c860ae4da427415c8e86415'
-    if (!(Test-Path (Join-Path $comfy 'main.py'))) { throw 'ComfyUI checkout missing main.py' }
-    if (!(& git -C $comfy status --porcelain)) {
-        & git -C $comfy fetch --depth 1 origin $comfyPin
-        if ($LASTEXITCODE -ne 0) { throw 'ComfyUI pin download failed' }
-        & git -C $comfy checkout --detach $comfyPin
-        if ($LASTEXITCODE -ne 0) { throw 'ComfyUI pin checkout failed' }
-    } else {
-        Write-Warning 'ComfyUI local changes detected, retaining original without reset'
-    }
-    & $python -m pip install -r (Join-Path $comfy 'requirements.txt') huggingface_hub hf_xet Pillow numpy
-    if ($LASTEXITCODE -ne 0) { throw 'ComfyUI Python dependencies failed' }
-    $node = Join-Path $comfy 'custom_nodes\minimax-h3-audio-T8'
-    if (!(Test-Path (Join-Path $node '.git'))) {
-        & git clone https://github.com/T8mars/comfyui-minimax-h3-audio-T8.git $node
-        if ($LASTEXITCODE -ne 0) { throw 'H3 T8 node clone failed' }
-    }
-    $nodePin = '3a23f333537d9a715aad7ce79af8d9ec891d9ad8'
-    if (!(& git -C $node status --porcelain)) {
-        & git -C $node fetch --depth 1 origin $nodePin
-        if ($LASTEXITCODE -ne 0) { throw 'T8 source pin fetch failed' }
-        & git -C $node checkout --detach $nodePin
-        if ($LASTEXITCODE -ne 0) { throw 'T8 checkout failed' }
-    }
-    $nodeReq = Join-Path $node 'requirements.txt'
-    if (Test-Path $nodeReq) {
-        & $python -m pip install -r $nodeReq
-        if ($LASTEXITCODE -ne 0) { throw 'H3 T8 dependencies failed' }
-    }
-    $yaml = Join-Path $Runtime 'extra_model_paths.yaml'
-    $modelPath = (Join-Path $Models 'H3').Replace('\','/')
-    $yamlText = "banana12b:`n  base_path: `"$modelPath`"`n  diffusion_models: diffusion_models`n  text_encoders: text_encoders`n  vae: vae`n  loras: loras`n"
-    [IO.File]::WriteAllText($yaml, $yamlText, (New-Object System.Text.UTF8Encoding($false)))
-    # Windows PowerShell 5.1 does not auto-load ZipFile; verify the assembly
-    # before touching any cached CUDA13 archive or downloading its replacement.
-    try {
-        Add-Type -AssemblyName 'System.IO.Compression.FileSystem' -ErrorAction Stop
-    } catch {
-        Add-Type -AssemblyName 'System.IO.Compression.ZipFile' -ErrorAction Stop
-    }
-    if (-not ('System.IO.Compression.ZipFile' -as [type])) {
-        throw 'The .NET ZIP reader could not be loaded. Install/repair .NET Framework and rerun.'
-    }
-    $llamaFolder = Join-Path $Runtime 'llama.cpp'
-    $llamaExe = Join-Path $llamaFolder 'llama-server.exe'
-    if (!(Test-Path $llamaExe)) {
-        Write-Host 'Downloading official llama.cpp CUDA13 Windows release and matching runtime DLLs...'
-        $headers = @{ 'User-Agent' = 'BANANAMV-12B-OneClick'; 'Accept' = 'application/vnd.github+json' }
-        $releases = Invoke-RestMethod -Uri 'https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=12' -Headers $headers
-        $chosen = $null
-        foreach ($release in $releases) {
-            $main = @($release.assets | Where-Object { $_.name -match '^llama-.*-bin-win-cuda-13(\.\d+)?-x64\.zip$' } | Select-Object -First 1)
-            $cudart = @($release.assets | Where-Object { $_.name -match '^cudart-llama(?:-.*)?-bin-win-cuda-13(\.\d+)?-x64\.zip$' } | Select-Object -First 1)
-            if ($main.Count -gt 0 -and $cudart.Count -gt 0) {
-                $chosen = @{ main=$main[0]; runtime=$cudart[0]; tag=$release.tag_name }
-                break
-            }
+        $sourceGuide = Join-Path $SharedRoot 'App\guides\VIDEO_PROMPT_WRITING_GUIDE_ref_en.md'
+        if (!(Test-Path $sourceGuide) -or (Get-Item $sourceGuide).Length -lt 1000) {
+            throw "Cannot locate existing H3 director guide: $sourceGuide"
         }
-        if (!$chosen) { throw 'No complete Windows CUDA13 llama.cpp release pair found; do not substitute CPU binaries.' }
-        New-Item -ItemType Directory -Force -Path $llamaFolder | Out-Null
-        foreach ($item in @($chosen.main,$chosen.runtime)) {
-            $zip = Join-Path $Runtime $item.name
-            $validZip = $false
-            if (Test-Path $zip) {
-                try {
-                    $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
-                    try { $validZip = ($archive.Entries.Count -gt 0) }
-                    finally { $archive.Dispose() }
-                } catch { $validZip = $false }
-            }
-            if (!$validZip) {
-                # Never retain an interrupted/incomplete download as a valid cached ZIP.
-                Remove-Item -LiteralPath $zip -Force -ErrorAction SilentlyContinue
-                $partial = "$zip.partial"
-                Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
-                Invoke-WebRequest -UseBasicParsing -Uri $item.browser_download_url -OutFile $partial -Headers @{ 'User-Agent'='BANANAMV-12B-OneClick' }
-                $archive = [System.IO.Compression.ZipFile]::OpenRead($partial)
-                try { if ($archive.Entries.Count -eq 0) { throw 'llama.cpp archive is empty' } }
-                finally { $archive.Dispose() }
-                Move-Item -LiteralPath $partial -Destination $zip -Force
-            }
-            $expanded = Join-Path $Runtime ('unzip_'+$item.name.Replace('.zip',''))
-            New-Item -ItemType Directory -Force -Path $expanded | Out-Null
-            Expand-Archive -LiteralPath $zip -DestinationPath $expanded -Force
-            foreach ($file in @(Get-ChildItem -Path $expanded -Recurse -File)) {
-                Copy-Item -LiteralPath $file.FullName -Destination (Join-Path $llamaFolder $file.Name) -Force
-            }
-            Remove-Item -LiteralPath $expanded -Recurse -Force
-        }
-        if (!(Test-Path $llamaExe)) { throw 'Downloaded llama.cpp archive does not contain llama-server.exe' }
+        New-Item -Path (Split-Path $guide) -ItemType Directory -Force | Out-Null
+        Copy-Item -LiteralPath $sourceGuide -Destination $guide
     }
-    # A present EXE is not proof it can use RTX CUDA. Verify before installing
-    # very large model weights; never substitute a CPU-only llama.cpp binary.
-    Write-Host 'Checking llama.cpp CUDA device visibility...'
-    $cudaDevices = (& $llamaExe --list-devices 2>&1 | Out-String)
-    if ($LASTEXITCODE -ne 0 -or $cudaDevices -notmatch 'CUDA0:') {
-        throw "llama.cpp did not detect NVIDIA CUDA0. Check Runtime/llama.cpp DLLs and CUDA 13 release. Output: $cudaDevices"
-    }
-    Write-Host ($cudaDevices.Trim())
-    # CPU music parser remains isolated from the GPU video environment.
-    $musicPython = Join-Path $Runtime 'music-venv\Scripts\python.exe'
-    if (!(Test-Path $musicPython)) {
-        & $basePython -m venv (Join-Path $Runtime 'music-venv')
-        if ($LASTEXITCODE -ne 0) { throw 'Music venv create failed' }
-    }
-    & $musicPython -m pip install --upgrade pip
-    if ($LASTEXITCODE -ne 0) { throw 'Music pip setup failed' }
-    & $musicPython -m pip install torch --index-url https://download.pytorch.org/whl/cpu
-    if ($LASTEXITCODE -ne 0) { throw 'Music CPU torch install failed' }
-    & $musicPython -m pip install 'all-in-one-infer @ git+https://github.com/openmirlab/all-in-one-infer.git@566f96c3f007c783ab5eb6db0123bf3335af8f31'
-    if ($LASTEXITCODE -ne 0) { throw 'Music analysis dependency install failed' }
-    Write-Host 'Downloading Gemma 3 Q5, matching vision projector, and six H3 files (resumable)...'
-    & $python (Join-Path $App 'tools\install_12b_models.py') --models-root $Models
-    if ($LASTEXITCODE -ne 0) { throw 'Model download did not complete; rerun installer to resume' }
-    # Run a real file instead of inline python -c: PowerShell 5.1 strips nested
-    # double quotes, turning print("Torch") into print(Torch) and causing NameError.
-    Write-Host 'Checking isolated RTX 5070 CUDA 13 PyTorch runtime...'
-    & $python (Join-Path $App 'tools\check_cuda27b.py')
-    if ($LASTEXITCODE -ne 0) { throw '12B CUDA13 smoke test failed; inspect the Python output above before changing drivers.' }
+
+    # Point ComfyUI at existing H3 weights: zero copies, zero H3 downloads.
+    $yamlPath = Join-Path $LocalRuntime 'extra_model_paths.yaml'
+    $h3Path = $SharedH3.Replace('\','/')
+    $yamlText = @(
+        'banana12b:'
+        "  base_path: '$h3Path'"
+        '  diffusion_models: diffusion_models'
+        '  text_encoders: text_encoders'
+        '  vae: vae'
+        '  loras: loras'
+    ) -join [Environment]::NewLine
+    [IO.File]::WriteAllText($yamlPath, $yamlText, (New-Object System.Text.UTF8Encoding($false)))
+
+    # ONLY two files are downloaded: Gemma 12B Q5 and its matched F16 mmproj.
+    Write-Host 'Downloading/checking only the two Gemma 3 12B GGUF files...'
+    & $Python (Join-Path $App 'tools\install_12b_models.py') --models-root $Models
+    if ($LASTEXITCODE -ne 0) { throw 'Gemma model download failed; rerun installer to resume.' }
+
     $launchCmd = Join-Path $Root 'Launch_BANANAMV_12B.cmd'
-    $launchText = "@echo off`r`nchcp 65001 >nul`r`npowershell.exe -NoProfile -ExecutionPolicy Bypass -File `"%~dp0App\tools\launch_12b.ps1`"`r`nif errorlevel 1 pause`r`n"
+    $launchText = "@echo off" + [Environment]::NewLine +
+        "chcp 65001 >nul" + [Environment]::NewLine +
+        'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0App\tools\launch_12b.ps1"' +
+        [Environment]::NewLine + 'if errorlevel 1 pause' + [Environment]::NewLine
     [IO.File]::WriteAllText($launchCmd,$launchText,(New-Object System.Text.UTF8Encoding($false)))
     try {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath('Desktop')) 'BANANAMV 12B.lnk'))
         $shortcut.TargetPath = $launchCmd
         $shortcut.WorkingDirectory = $Root
-        $shortcut.Description = 'BANANAMV Gemma 3 12B Q5_K_M independent F-drive studio'
+        $shortcut.Description = 'BANANAMV Gemma 3 12B Q5, shared 5070 runtime'
         $shortcut.Save()
-    } catch { Write-Warning 'Desktop shortcut failed; use Launch_BANANAMV_12B.cmd' }
-    Write-Host '✅ BANANAMV Gemma 3 12B Q5 standalone installation ready.'
-    Write-Host "Root: $Root"
-    Write-Host 'Frontend: http://127.0.0.1:8193'
-    Write-Host 'Default: 720P / 10 seconds, independent project and model storage'
+    } catch { Write-Warning 'Desktop shortcut not created; use Launch_BANANAMV_12B.cmd.' }
+    Write-Host '12B thin installation ready: two new model files, existing 5070 runtime and H3 weights.'
+    Write-Host "Root: $Root; 5070 runtime: $SharedRuntime"
     & (Join-Path $App 'tools\launch_12b.ps1') -Root $Root
-} finally {
+}
+finally {
     Stop-Transcript | Out-Null
 }
