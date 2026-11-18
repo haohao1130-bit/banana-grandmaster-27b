@@ -63,9 +63,14 @@ def first_appearances(brief):
         stamp = TIME.search(line)
         if not stamp:
             continue
-        # A nearby performance sentence owns this time; a subsequent unrelated
-        # story paragraph must not borrow a timestamp many lines earlier.
-        neighborhood = " ".join(lines[i:i+4])
+        # A nearby performance sentence owns this time; never borrow the
+        # next timestamp block's first-entrance event.
+        rows = [line]
+        for following in lines[i+1:i+4]:
+            if TIME.search(following):
+                break
+            rows.append(following)
+        neighborhood = " ".join(rows)
         for role in ("S1", "S2"):
             if not re.search(r"\b" + role + r"\b", neighborhood, re.I):
                 continue
@@ -93,6 +98,9 @@ def clip_visibility(event, brief, segment, pictures, cues):
     for role, pic in pictures.items():
         p = PRESENT_REF.search(pic)
         if p and int(p[1]) in active_refs:
+            visible_roles.add(role)
+        # Local event may explicitly name a singer role without a Picture tag.
+        if re.search(r"\\b" + role + r"\\b", event, re.I):
             visible_roles.add(role)
     access = {}
     for role in ("S1", "S2"):
