@@ -31,7 +31,7 @@ class Gemma12BTests(unittest.TestCase):
         self.assertEqual(s["host"], "127.0.0.1")
         self.assertEqual(s["context"], 16384)
         self.assertEqual(s["gpu_layers"], 99)
-        self.assertEqual(s["max_tokens"], 8192)
+        self.assertEqual(s["max_tokens"], 4096)
         self.assertIn("gemma-3-12b-it-Q5_K_M.gguf", str(s["model"]))
         self.assertIn("mmproj-google_gemma-3-12b-it-f16.gguf", str(s["mmproj"]))
         argv = llama27b._launch_args(s)
