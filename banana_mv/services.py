@@ -27,7 +27,7 @@ DEFAULTS = {
     'free_after_rewrite': True,
     'rewriter': {'model': str(llama27b.DEFAULT_MODEL), 'mmproj': str(llama27b.DEFAULT_MMPROJ),
                  'server': str(llama27b.DEFAULT_SERVER), 'port': 8217,
-                 'gpu_layers': 12, 'context': 8192, 'max_length': 4096,
+                 'gpu_layers': 12, 'context': 32768, 'max_length': 4096,
                  'temperature': 0.4, 'top_p': 0.8},
 }
 
@@ -43,6 +43,10 @@ def load_config():
     for key in cfg['rewriter']:
         if key in saved.get('rewriter', {}):
             cfg['rewriter'][key] = saved['rewriter'][key]
+    # Earlier 27B one-click installs persisted the old 8K default.
+    # Lift ONLY that known legacy default to 32K; keep custom user values.
+    if int(cfg['rewriter'].get('context', 32768)) == 8192:
+        cfg['rewriter']['context'] = 32768
     return cfg
 
 
