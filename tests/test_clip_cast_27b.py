@@ -56,6 +56,14 @@ class ExplicitCastTests(unittest.TestCase):
             {"start": 10, "seconds": 10}, roles, cues)
         self.assertEqual(second["S1"]["status"], "entry")
         self.assertAlmostEqual(second["S1"]["at"], 7.813)
+        before_entry = premature_cast_errors(
+            {1: "<Subject 1> watches <Subject 2> from the doorway."}, second,
+            [{"number": 1, "start": 0.0, "end": 5.0}])
+        self.assertIn(1, before_entry)
+        after_entry = premature_cast_errors(
+            {2: "<Subject 1> enters after the first reveal."}, second,
+            [{"number": 2, "start": 8.0, "end": 10.0}])
+        self.assertEqual(after_entry, {})
 
     def test_no_inferred_debut_without_author_instruction(self):
         policy = clip_visibility(
