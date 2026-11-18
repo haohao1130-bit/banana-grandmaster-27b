@@ -82,8 +82,8 @@ def restart_capability():
             enabled = time.time() - RESTART_HEARTBEAT.stat().st_mtime < 12
         except OSError:
             enabled = False
-    standalone = os.environ.get('BANANA_27B_STANDALONE') == '1'
-    missing = ('27B 獨立重啟管家未啟動，請使用 27B 桌面捷徑重新啟動。'
+    standalone = os.environ.get('BANANA_12B_STANDALONE') == '1'
+    missing = ('12B 獨立重啟管家未啟動，請使用 12B 桌面捷徑重新啟動。'
                if standalone else '5070 桌面管家尚未啟動，請使用 V4 桌面捷徑。')
     return {'available': enabled, 'busy': GPU_LOCK.locked(),
             'reason': (missing if not enabled
@@ -92,9 +92,9 @@ def restart_capability():
 
 def request_desktop_restart(handler, payload):
     """Request, never execute, a privileged restart; Windows supervisor owns processes."""
-    standalone = os.environ.get('BANANA_27B_STANDALONE') == '1'
-    expected_header = '27b-restart' if standalone else '5070-restart'
-    expected_confirm = 'restart-27b' if standalone else 'restart-5070'
+    standalone = os.environ.get('BANANA_12B_STANDALONE') == '1'
+    expected_header = '12b-restart' if standalone else '5070-restart'
+    expected_confirm = 'restart-12b' if standalone else 'restart-5070'
     if handler.headers.get('X-Banana-Control') != expected_header:
         raise ValueError('缺少本機控制確認標頭。')
     if handler.headers.get('Content-Type','').split(';',1)[0].strip().lower() != 'application/json':
@@ -125,7 +125,7 @@ def request_desktop_restart(handler, payload):
         if RESTART_REQUEST.exists():
             raise ValueError('重新啟動要求已送出，請勿重複點擊。')
         if standalone:
-            # Release the idle 27B process we own before the HTTP worker exits.
+            # Release the idle 12B process we own before the HTTP worker exits.
             # The supervisor only recycles this HTTP process; H3 ComfyUI stays alive.
             backend.cancel_27b()
         RESTART_REQUEST.parent.mkdir(parents=True, exist_ok=True)
@@ -465,10 +465,10 @@ def stop_job(job_id):
     if not pid:
         pid=backend.active_rewrite_prompt_id()
     if not pid:
-        # A 27B rewrite has no ComfyUI prompt ID; cancel only our own llama worker.
+        # A 12B rewrite has no ComfyUI prompt ID; cancel only our own llama worker.
         backend.cancel_27b()
-        return {'ok':True,'message':'已要求中斷 27B 導演並停止後續生成。',
-                'interruption':'27b_cancel_requested'}
+        return {'ok':True,'message':'已要求中斷 12B 導演並停止後續生成。',
+                'interruption':'12b_cancel_requested'}
     try:
         cfg=backend.load_config()
         result=cancel_prompt(cfg,pid)
@@ -1254,7 +1254,7 @@ def resume(job_id,rewrite_retries=None):
 class Handler(WebHandler):
     def do_GET(self):
         if self.path == '/api/5070/switch':
-            if os.environ.get('BANANA_27B_STANDALONE') == '1':
+            if os.environ.get('BANANA_12B_STANDALONE') == '1':
                 return self.send_json({'available': False, 'busy': GPU_LOCK.locked()})
             from banana_mv.room_switch import launcher
             return self.send_json({'available': bool(launcher('film', backend.PORT)),
@@ -1314,8 +1314,8 @@ class Handler(WebHandler):
 
     def do_POST(self):
         if self.path == '/api/5070/switch':
-            if os.environ.get('BANANA_27B_STANDALONE') == '1':
-                return self.send_json({'error':'27B 為獨立測試片場，不支援切換到另一座丹爐。'},400)
+            if os.environ.get('BANANA_12B_STANDALONE') == '1':
+                return self.send_json({'error':'12B 為獨立測試片場，不支援切換到另一座丹爐。'},400)
             from banana_mv.room_switch import switch
             return switch(self, 'film', backend, GPU_LOCK)
         path=urllib.parse.urlparse(self.path).path
