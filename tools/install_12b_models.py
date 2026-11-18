@@ -1,7 +1,7 @@
-"""One-click, resumable download manifest for the isolated Gemma 3 12B studio.
+"""Install ONLY Gemma 3 12B IT Q5 and its matching F16 projector.
 
-H3 files mirror the actual banana_mv.core.MODELS and MOTION_LORAS names.
-Never download Qwen 27B, or the specialized 9B rewriter.
+All existing H3 models stay in F:/AI/BANANAMV_27B_STUDIO/Models/H3,
+and all shared CUDA/ComfyUI runtimes remain read-only from this installer.
 """
 import argparse
 import json
@@ -12,15 +12,7 @@ from huggingface_hub import hf_hub_download, HfApi
 MANIFEST = [
     ("bartowski/google_gemma-3-12b-it-GGUF", "google_gemma-3-12b-it-Q5_K_M.gguf", "12B"),
     ("bartowski/google_gemma-3-12b-it-GGUF", "mmproj-google_gemma-3-12b-it-f16.gguf", "12B"),
-    ("OliviaRossi/Minimax-h3_Singularity-x-10Eros-Max_PRISM",
-     "Minimax-h3_Singularity_x_10Eros-Max_PRISM_int8.safetensors", "H3/diffusion_models"),
-    ("Comfy-Org/MiniMax-H3", "text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors", "H3"),
-    ("Comfy-Org/MiniMax-H3", "vae/minimax_h3_video_vae_int8_convrot.safetensors", "H3"),
-    ("Comfy-Org/MiniMax-H3", "vae/minimax_h3_audio_vae_fp32.safetensors", "H3"),
-    ("dseditor/minimax-h3-studio-assets", "loras/H3_Combat_V2.safetensors", "H3"),
-    ("dseditor/minimax-h3-studio-assets", "loras/Motion_Repair.safetensors", "H3"),
 ]
-
 
 def download_all(root):
     root = Path(root)
