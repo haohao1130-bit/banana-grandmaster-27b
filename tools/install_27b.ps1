@@ -145,6 +145,16 @@ try {
     $modelPath = (Join-Path $Models 'H3').Replace('\','/')
     $yamlText = "banana27b:`n  base_path: `"$modelPath`"`n  diffusion_models: diffusion_models`n  text_encoders: text_encoders`n  vae: vae`n  loras: loras`n"
     [IO.File]::WriteAllText($yaml, $yamlText, (New-Object System.Text.UTF8Encoding($false)))
+    # Windows PowerShell 5.1 does not auto-load ZipFile; verify the assembly
+    # before touching any cached CUDA13 archive or downloading its replacement.
+    try {
+        Add-Type -AssemblyName 'System.IO.Compression.FileSystem' -ErrorAction Stop
+    } catch {
+        Add-Type -AssemblyName 'System.IO.Compression.ZipFile' -ErrorAction Stop
+    }
+    if (-not ('System.IO.Compression.ZipFile' -as [type])) {
+        throw 'The .NET ZIP reader could not be loaded. Install/repair .NET Framework and rerun.'
+    }
     $llamaFolder = Join-Path $Runtime 'llama.cpp'
     $llamaExe = Join-Path $llamaFolder 'llama-server.exe'
     if (!(Test-Path $llamaExe)) {
