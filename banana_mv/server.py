@@ -1266,7 +1266,7 @@ class Handler(WebHandler):
             return self.send_file(WEB/'clip_review.js')
         if url.path=='/api/health':
             return self.send_json({'service':'banana-mv','standalone':True,'instance':SERVER_INSTANCE,
-                                   'version':SERVER_BUILD})
+                                   'pid':os.getpid(), 'version':SERVER_BUILD})
         if url.path=='/api/mv/face-refine-capability':
             return self.send_json({'local5070':backend.PORT == 8193})
         if url.path=='/api/mv/restart-capability':
