@@ -14,7 +14,8 @@ from urllib import request
 
 
 APP = Path(__file__).resolve().parents[1]
-DATA = Path(os.environ["BANANA_DATA"]).resolve()
+ROOT = Path(os.environ.get("BANANA_27B_ROOT", r"F:\AI\BANANAMV_27B_STUDIO"))
+DATA = Path(os.environ.get("BANANA_DATA", str(ROOT / "Data"))).resolve()
 HEARTBEAT = DATA / "restart-controller.heartbeat"
 REQUEST = DATA / "restart-request.json"
 BRANCH = "experiment/rtx5070-latest-27b-lab"
