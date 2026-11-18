@@ -2,8 +2,10 @@
 
 **本分支只跑 Qwen3.5-27B GGUF Q4_K_M 導演，沒有 9B 切換，也不改 BANANAMV / BANANAFILM 成功版。**
 
+**手機 Tailscale 連線維持 8193**：與原本 5070 前端使用同一個服務埠。原本佔用 8193 的 MV／FILM 後端需先正常結束，不能同時啟動；27B 不會強制停止其他服務。若原本 Tailscale Serve 反向代理已指向本機 8193，可沿用原手機網址；否則須檢查 Serve 對應。
+
 - 安裝目錄：`F:\AI\BANANAMV_27B_STUDIO`
-- 前端：`http://127.0.0.1:8195`；專用 H3 ComfyUI：`127.0.0.1:8218`；27B llama.cpp（按需起停）：`127.0.0.1:8217`
+- 前端：`http://127.0.0.1:8193`；專用 H3 ComfyUI：`127.0.0.1:8218`；27B llama.cpp（按需起停）：`127.0.0.1:8217`
 - RTX 5070 12GB / 5800X3D / 64GB RAM：27B 部分 GPU offload，其餘系統 RAM，不能保證速度；H3 執行前確認 27B owned process 卸載。
 - 前端預設：**720P 1280×720、10 秒／段、末幀接續**；可自行改 480P 或 5 秒作診斷。
 - 一鍵安裝：`tools/install_27b.ps1`，可用配套 `Install_BANANAMV_27B.cmd` 啟動；自動建立資料夾、Git checkout、CUDA13 Python、獨立 Comfy/T8、llama.cpp CUDA13、音樂分析、8 個 HF 模型，僅重抓缺少或不完整的檔案。
