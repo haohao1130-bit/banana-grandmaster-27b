@@ -37,7 +37,7 @@ def _settings(cfg):
         "model": Path(os.environ.get("BANANA_27B_MODEL") or rw.get("model") or DEFAULT_MODEL),
         "mmproj": Path(os.environ.get("BANANA_27B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
         "gpu_layers": int(rw.get("gpu_layers", 12)),
-        "context": int(rw.get("context", 8192)),
+        "context": int(rw.get("context", 32768)),
         "max_tokens": int(rw.get("max_length", 4096)),
         "temperature": float(rw.get("temperature", 0.4)),
         "top_p": float(rw.get("top_p", 0.8)),
