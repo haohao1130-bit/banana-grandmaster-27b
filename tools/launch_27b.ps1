@@ -30,6 +30,13 @@ try {
 if (!(Test-Path -LiteralPath $python)) { throw "27B Python missing: $python. Run Install_BANANAMV_27B.cmd." }
 if (!(Test-Path -LiteralPath (Join-Path $comfy 'main.py'))) { throw 'Independent ComfyUI missing; run installer.' }
 # Safe one-click startup update. Never reset local edits or switch branches.
+# If a new launcher is downloaded, reload the new script before any service
+# starts; otherwise PowerShell would continue running its old in-memory version.
+$beforeUpdate = ''
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $beforeUpdate = (& git -C $app rev-parse HEAD 2>$null | Select-Object -Last 1)
+    if (!$beforeUpdate) { $beforeUpdate = '' }
+}
 if (Get-Command git -ErrorAction SilentlyContinue) {
     $current = (& git -C $app branch --show-current 2>$null).Trim()
     $dirty = & git -C $app status --porcelain
@@ -39,6 +46,18 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     } else {
         Write-Warning '27B local source edits / different branch detected; no update or reset.'
     }
+}
+$afterUpdate = ''
+if (Get-Command git -ErrorAction SilentlyContinue) {
+    $afterUpdate = (& git -C $app rev-parse HEAD 2>$null | Select-Object -Last 1)
+    if (!$afterUpdate) { $afterUpdate = '' }
+}
+if ($beforeUpdate -and $afterUpdate -and $beforeUpdate -ne $afterUpdate -and
+    $env:BANANA_27B_LAUNCH_RELOADED -ne '1') {
+    Write-Host '27B updated; reloading the new launcher before starting services.'
+    $env:BANANA_27B_LAUNCH_RELOADED = '1'
+    & (Join-Path $app 'tools\launch_27b.ps1') -Root $Root -NoBrowser:$NoBrowser
+    exit $LASTEXITCODE
 }
 foreach ($dir in @($data,$logs,$out)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 $env:BANANA_DATA = $data
