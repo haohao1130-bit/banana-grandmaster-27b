@@ -346,7 +346,7 @@ def local_prompt(cfg, req, segment, original, tail, *, scene_input=None, event_c
             else:
                 rewritten=normalize_mv_prompt(raw,picture_count)
             if attempt:
-                segment['prompt_reference_repair']={'status':'repaired','message':'9B 結構或媒體引用已自動修正。'}
+                segment['prompt_reference_repair']={'status':'repaired','message':'12B 結構或媒體引用已自動修正。'}
             break
         except (SceneStateError,MediaReferenceError) as error:
             if scene_input is not None:
@@ -372,9 +372,9 @@ def local_prompt(cfg, req, segment, original, tail, *, scene_input=None, event_c
                                       if scene_input is not None else ''))]
                 continue
             if scene_input is not None:
-                raise SceneStateError('9B 本段狀態／引用修復失敗：'+str(error)) from error
+                raise SceneStateError('12B 本段狀態／引用修復失敗：'+str(error)) from error
             rewritten=fallback_prompt(req['prompt'],bool(tail),fallback_lyrics,len(originals),scene_aware=optimize)
-            segment['prompt_reference_repair']={'status':'fallback','message':'9B 引用修正未成功；此段改用原控制詞與導演規則。'}
+            segment['prompt_reference_repair']={'status':'fallback','message':'12B 引用修正未成功；此段改用原控制詞與導演規則。'}
     if optimize:
         segment.pop('prompt_review',None)
         segment['prompt_validation']={'status':'passed','kind':'technical_only'}
