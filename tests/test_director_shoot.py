@@ -85,7 +85,7 @@ class FreeDirectorShotsTests(unittest.TestCase):
                 second = (n - 1) * 0.5
                 lines.append(f'[Shot {n}] At 00:{second:06.3f}, '
                              f'New meaningful camera angle {n} follows the ongoing action.')
-        blocks, slots = parse_director_shots('\\n'.join(lines), 10, [])
+        blocks, slots = parse_director_shots('\n'.join(lines), 10, [])
         self.assertEqual(len(slots), 14)
         self.assertEqual(slots[0]['start'], 0.0)
         self.assertEqual(slots[-1]['start'], 6.5)
