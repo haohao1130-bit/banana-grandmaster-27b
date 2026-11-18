@@ -27,7 +27,7 @@ DEFAULTS = {
     'free_after_rewrite': True,
     'rewriter': {'model': str(llama27b.DEFAULT_MODEL), 'mmproj': str(llama27b.DEFAULT_MMPROJ),
                  'server': str(llama27b.DEFAULT_SERVER), 'port': 8217,
-                 'gpu_layers': 'auto', 'context': 32768, 'max_length': 4096,
+                 'gpu_layers': 999, 'context': 32768, 'max_length': 4096,
                  'temperature': 0.4, 'top_p': 0.8},
 }
 
@@ -47,10 +47,10 @@ def load_config():
     # Lift ONLY that known legacy default to 32K; keep custom user values.
     if int(cfg['rewriter'].get('context', 32768)) == 8192:
         cfg['rewriter']['context'] = 32768
-    # Earlier installers used fixed 12/35 layers. Migrate those known
-    # defaults to native auto; preserve any other explicit numeric cap.
-    if str(cfg['rewriter'].get('gpu_layers', 'auto')).lower() in ('12', '35', 'auto'):
-        cfg['rewriter']['gpu_layers'] = 'auto'
+    # Migrate earlier 12/35/auto defaults to the explicitly requested
+    # full CUDA layer mode. Preserve other user-chosen numeric layer caps.
+    if str(cfg['rewriter'].get('gpu_layers', 999)).lower() in ('12', '35', 'auto', 'all', '999'):
+        cfg['rewriter']['gpu_layers'] = 999
     return cfg
 
 
