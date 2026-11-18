@@ -12,6 +12,8 @@
 - 前端預設：**720P 1280×720、10 秒／段、末幀接續**；可自行改 480P 或 5 秒作診斷。
 - 一鍵安裝：`tools/install_27b.ps1`，可用配套 `Install_BANANAMV_27B.cmd` 啟動；自動建立資料夾、Git checkout、CUDA13 Python、獨立 Comfy/T8、llama.cpp CUDA13、音樂分析、8 個 HF 模型，僅重抓缺少或不完整的檔案。
 - 桌面啟動：自動建立「BANANAMV 27B」，或使用 `F:\AI\BANANAMV_27B_STUDIO\Launch_BANANAMV_27B.cmd`。
+- **27B 獨立網頁重啟**：桌面啟動器啟動 `tools/supervise_27b.py`，由獨立重啟管理程序提供心跳並管理它親自啟動的 8193 Python 後端。手機網頁按「重啟丹爐」時，先確認沒有 27B 生成任務與 H3 佇列，先卸載所屬 27B llama，再只重啟所屬 Python 後端；**H3 ComfyUI（8218）保持執行，不碰其他 MV／FILM 程序**。重啟後由首頁重新連線，專案及模型檔案保持原樣。
+- **舊版第一次升級**：執行新版啟動器以前先安全 `git pull --ff-only`，再啟動更新後的 `tools/launch_27b.ps1`。舊版 PowerShell 已在記憶體內時，即使拉到新版程式也可能仍執行舊啟動流程；後續新版啟動器更新時會自動重新載入自身。
 - 日誌：`F:\AI\BANANAMV_27B_STUDIO\Logs`；作品：`F:\AI\BANANAMV_27B_STUDIO\Output`；專案：`F:\AI\BANANAMV_27B_STUDIO\Data`。
 
 ### 實際模型下載清單
