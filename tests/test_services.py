@@ -29,29 +29,27 @@ class ServicesTests(unittest.TestCase):
                 with self.assertRaises(ValueError):services.add_asset(cfg,'bad.png',b'not an image')
                 self.assertEqual(len(services.library_index()),1)
 
-    def test_legacy_8k_director_context_migrates_to_32k(self):
+    def test_dedicated_12b_defaults_and_user_tuning(self):
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
             path = data / 'config.json'
             with patch.object(services, 'DATA', data):
-                path.write_text(json.dumps({'rewriter': {'context': 8192}}))
-                self.assertEqual(services.load_config()['rewriter']['context'], 32768)
-                path.write_text(json.dumps({'rewriter': {'context': 8192, 'gpu_layers': 12}}))
-                migrated = services.load_config()['rewriter']
-                self.assertEqual(migrated['context'], 32768)
-                self.assertEqual(migrated['gpu_layers'], 999)
-                path.write_text(json.dumps({'rewriter': {'context': 32768, 'gpu_layers': 'auto'}}))
-                self.assertEqual(services.load_config()['rewriter']['gpu_layers'], 999)
-                path.write_text(json.dumps({'rewriter': {'context': 32768, 'gpu_layers': 35}}))
-                self.assertEqual(services.load_config()['rewriter']['gpu_layers'], 999)
-                path.write_text(json.dumps({'rewriter': {'context': 32768, 'gpu_layers': 25}}))
-                self.assertEqual(services.load_config()['rewriter']['gpu_layers'], 25)
-                path.write_text(json.dumps({'rewriter': {'context': 65536}}))
-                self.assertEqual(services.load_config()['rewriter']['context'], 65536)
+                self.assertEqual(services.load_config()['rewriter']['context'], 16384)
+                self.assertEqual(services.load_config()['rewriter']['gpu_layers'], 99)
+                path.write_text(json.dumps({'rewriter': {'context': 8192, 'gpu_layers': 25}}))
+                custom = services.load_config()['rewriter']
+                self.assertEqual(custom['context'], 8192)
+                self.assertEqual(custom['gpu_layers'], 25)
+                path.write_text(json.dumps({'rewriter': {
+                    'model': r'F:\\old\\Qwen3.5-27B-Q4_K_M.gguf',
+                    'mmproj': r'F:\\old\\mmproj-BF16.gguf'}}))
+                cfg = services.load_config()['rewriter']
+                self.assertIn('gemma-3-12b-it-Q5_K_M.gguf', cfg['model'])
+                self.assertIn('mmproj-google_gemma-3-12b-it-f16.gguf', cfg['mmproj'])
 
-    def test_27b_exclusive_dispatch_and_h3_handoff(self):
+    def test_12b_exclusive_dispatch_and_h3_handoff(self):
         cfg=services.load_config()
-        self.assertIn('27B',cfg['rewriter']['model'])
+        self.assertIn('12B',cfg['rewriter']['model'])
         pics=[Image.new('RGB',(64,64),c) for c in ('red','blue')]
         parts=[('text','<Picture 1>'),('image',pics[0]),('text','<Picture 2>'),('image',pics[1])]
         with patch.object(services.llama27b,'generate',return_value='hello') as director, \
