@@ -8,7 +8,7 @@
 
 - 安裝目錄：`F:\AI\BANANAMV_27B_STUDIO`
 - 前端：`http://127.0.0.1:8193`；專用 H3 ComfyUI：`127.0.0.1:8218`；27B llama.cpp（按需起停）：`127.0.0.1:8217`
-- RTX 5070 12GB / 5800X3D / 64GB RAM：27B 部分 GPU offload，其餘系統 RAM，不能保證速度；H3 執行前確認 27B owned process 卸載。
+- RTX 5070 12GB / 5800X3D / 64GB RAM：27B 使用 llama.cpp 的 `-ngl auto -fit on -fitt 1024 -fa auto -np 1 -t 8`，自動依可用顯存卸載 GPU 層數，不再固定只卸載 12 層；32K 上下文不降低，仍無法把約 17.2GB 的 GGUF 整個裝入 12GB 顯存。已安裝舊值 `gpu_layers=12` 在下次啟動時遷移成 `auto`，其他自訂數值保留。可查看 `Logs/llama27b.log` 驗證真實 CUDA offload 與效能。H3 執行前仍卸載 27B。實際速度須本機測試。
 - 前端預設：**720P 1280×720、10 秒／段、末幀接續**；可自行改 480P 或 5 秒作診斷。
 - 一鍵安裝：`tools/install_27b.ps1`，可用配套 `Install_BANANAMV_27B.cmd` 啟動；自動建立資料夾、Git checkout、CUDA13 Python、獨立 Comfy/T8、llama.cpp CUDA13、音樂分析、8 個 HF 模型，僅重抓缺少或不完整的檔案。
 - 桌面啟動：自動建立「BANANAMV 27B」，或使用 `F:\AI\BANANAMV_27B_STUDIO\Launch_BANANAMV_27B.cmd`。
