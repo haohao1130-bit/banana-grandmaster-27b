@@ -25,6 +25,19 @@ _PROC = None
 _CANCELLED = threading.Event()
 
 
+def _gpu_layers(value):
+    """Accept native llama.cpp auto-fit, or a user-chosen nonnegative layer cap."""
+    if value is None or str(value).strip().lower() == "auto":
+        return "auto"
+    try:
+        n = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("27B gpu_layers must be 'auto' or a nonnegative integer") from exc
+    if n < 0:
+        raise ValueError("27B gpu_layers must be 'auto' or a nonnegative integer")
+    return n
+
+
 def _settings(cfg):
     rw = cfg.get("rewriter", {})
     host = "127.0.0.1"
@@ -36,7 +49,7 @@ def _settings(cfg):
         "exe": Path(os.environ.get("BANANA_27B_SERVER") or rw.get("server") or DEFAULT_SERVER),
         "model": Path(os.environ.get("BANANA_27B_MODEL") or rw.get("model") or DEFAULT_MODEL),
         "mmproj": Path(os.environ.get("BANANA_27B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
-        "gpu_layers": int(rw.get("gpu_layers", 12)),
+        "gpu_layers": _gpu_layers(rw.get("gpu_layers", "auto")),
         "context": int(rw.get("context", 32768)),
         "max_tokens": int(rw.get("max_length", 4096)),
         "temperature": float(rw.get("temperature", 0.4)),
@@ -56,6 +69,17 @@ def _health(s, timeout=2):
         return False
 
 
+def _launch_args(s):
+    # Recent official llama.cpp supports -ngl auto with memory auto-fit.
+    # Keep the explicitly requested 32K context. Do not force 8K for speed:
+    # the current multimodal commission can exceed 9K input tokens.
+    return [str(s["exe"]), "-m", str(s["model"]), "--mmproj", str(s["mmproj"]),
+            "--host", s["host"], "--port", str(s["port"]),
+            "-c", str(s["context"]), "-ngl", str(s["gpu_layers"]),
+            "-fit", "on", "-fitt", "1024", "-fa", "auto", "-np", "1",
+            "-t", "8", "--no-mmproj-offload"]
+
+
 def ensure_running(cfg):
     """Start our *own* local process; reject an occupied port we do not own."""
     global _PROC
@@ -70,13 +94,16 @@ def ensure_running(cfg):
         for label in ("exe", "model", "mmproj"):
             if not s[label].is_file():
                 raise FileNotFoundError("27B missing %s: %s; run one-click installer" % (label, s[label]))
-        args = [str(s["exe"]), "-m", str(s["model"]), "--mmproj", str(s["mmproj"]),
-                "--host", s["host"], "--port", str(s["port"]),
-                "-c", str(s["context"]), "-ngl", str(s["gpu_layers"]),
-                "--no-mmproj-offload"]
+        args = _launch_args(s)
         log = _ROOT / "Logs" / "llama27b.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("ab") as output:
+            banner = ("\\n[BANANAMV 27B] launch: "
+                      "context=%s, gpu_layers=%s, fit=on, fit_target=1024MiB, "
+                      "flash_attn=auto, parallel=1, cpu_threads=8\\n"
+                      % (s["context"], s["gpu_layers"]))
+            output.write(banner.encode("utf-8"))
+            output.flush()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
             _PROC = subprocess.Popen(args, cwd=str(s["exe"].parent),
                                      stdout=output, stderr=subprocess.STDOUT,
