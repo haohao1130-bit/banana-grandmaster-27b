@@ -29,6 +29,16 @@ class ServicesTests(unittest.TestCase):
                 with self.assertRaises(ValueError):services.add_asset(cfg,'bad.png',b'not an image')
                 self.assertEqual(len(services.library_index()),1)
 
+    def test_legacy_8k_director_context_migrates_to_32k(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp)
+            path = data / 'config.json'
+            with patch.object(services, 'DATA', data):
+                path.write_text(json.dumps({'rewriter': {'context': 8192}}))
+                self.assertEqual(services.load_config()['rewriter']['context'], 32768)
+                path.write_text(json.dumps({'rewriter': {'context': 65536}}))
+                self.assertEqual(services.load_config()['rewriter']['context'], 65536)
+
     def test_27b_exclusive_dispatch_and_h3_handoff(self):
         cfg=services.load_config()
         self.assertIn('27B',cfg['rewriter']['model'])
