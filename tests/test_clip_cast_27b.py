@@ -91,7 +91,7 @@ class RouteTests(unittest.TestCase):
         def camera(*args, **kwargs):
             called.append((args, kwargs))
             return "subject_definitions:\nValid test response."
-        with patch("banana_mv.shoot_plan._pictures", return_value=[]), \\
+        with patch("banana_mv.shoot_plan._pictures", return_value=[]), \
              patch("banana_mv.shoot_plan.write_director_shoot_prompt",
                    side_effect=camera):
             output = write_shoot_prompt(
