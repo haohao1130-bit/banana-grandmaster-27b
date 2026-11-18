@@ -7,8 +7,8 @@ if (!$Root.StartsWith('F:\',[System.StringComparison]::OrdinalIgnoreCase)) {
     throw 'The 12B independent studio must be installed on F:; no other drive will be modified.'
 }
 if (!(Test-Path 'F:\')) { throw 'F: does not exist. Connect the F: SSD first.' }
-if ($Root.TrimEnd('\\') -ieq 'F:') { throw 'Install into F:\\BANANAMV_12B_STUDIO, never directly into F:\\ root.' }
-if ($Root -like 'F:\\AI\\BANANAMV_27B_STUDIO*') { throw 'Refusing to overwrite existing 27B installation.' }
+if ($Root -ieq 'F:\') { throw 'Install into F:\BANANAMV_12B_STUDIO, never directly into F:\ root.' }
+if ($Root -like 'F:\AI\BANANAMV_27B_STUDIO*') { throw 'Refusing to overwrite existing 27B installation.' }
 $App = Join-Path $Root 'App'
 $Runtime = Join-Path $Root 'Runtime'
 $Models = Join-Path $Root 'Models'
