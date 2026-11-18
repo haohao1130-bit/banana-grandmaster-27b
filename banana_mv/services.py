@@ -27,7 +27,7 @@ DEFAULTS = {
     'free_after_rewrite': True,
     'rewriter': {'model': str(llama27b.DEFAULT_MODEL), 'mmproj': str(llama27b.DEFAULT_MMPROJ),
                  'server': str(llama27b.DEFAULT_SERVER), 'port': 8217,
-                 'gpu_layers': 999, 'context': 32768, 'max_length': 4096,
+                 'gpu_layers': 99, 'context': 16384, 'max_length': 4096,
                  'temperature': 0.4, 'top_p': 0.8},
 }
 
@@ -43,14 +43,13 @@ def load_config():
     for key in cfg['rewriter']:
         if key in saved.get('rewriter', {}):
             cfg['rewriter'][key] = saved['rewriter'][key]
-    # Earlier 27B one-click installs persisted the old 8K default.
-    # Lift ONLY that known legacy default to 32K; keep custom user values.
-    if int(cfg['rewriter'].get('context', 32768)) == 8192:
-        cfg['rewriter']['context'] = 32768
-    # Migrate earlier 12/35/auto defaults to the explicitly requested
-    # full CUDA layer mode. Preserve other user-chosen numeric layer caps.
-    if str(cfg['rewriter'].get('gpu_layers', 999)).lower() in ('12', '35', 'auto', 'all', '999'):
-        cfg['rewriter']['gpu_layers'] = 999
+    # This branch uses a NEW F-drive root and must never load old 27B config.
+    # Preserve user overrides, but reject any stale cross-model GGUF paths.
+    for key in ('model', 'mmproj', 'server'):
+        if key == 'model' and 'gemma-3-12b-it-Q5_K_M.gguf' not in str(cfg['rewriter'][key]):
+            cfg['rewriter'][key] = DEFAULTS['rewriter'][key]
+        if key == 'mmproj' and 'mmproj-google_gemma-3-12b-it-f16.gguf' not in str(cfg['rewriter'][key]):
+            cfg['rewriter'][key] = DEFAULTS['rewriter'][key]
     return cfg
 
 
@@ -125,7 +124,7 @@ def add_asset(cfg, filename, body):
 
 
 def active_rewrite_prompt_id():
-    """27B requests are owned by llama.cpp, not ComfyUI prompt IDs."""
+    """Gemma 12B requests are owned by llama.cpp, not ComfyUI prompt IDs."""
     return None
 
 
@@ -139,13 +138,13 @@ def release_27b():
 
 
 def queue_prompt(cfg, graph):
-    """Comfy entrypoint: free the exclusive 27B worker before H3 sampling."""
+    """Comfy entrypoint: free the exclusive 12B worker before H3 sampling."""
     release_27b()
     return _comfy_queue_prompt(cfg, graph)
 
 
 def rewrite_local(cfg, system, parts, job_id):
-    """Unload Comfy H3 caches before 27B; never fall back to 9B."""
+    """Unload Comfy H3 caches before Gemma 12B; never fall back to 9B."""
     # The previous H3 clip can leave weights cached in the *other* GPU process.
     # /free is a Comfy-owned request; it does not kill or unload our llama worker.
     comfy(cfg, '/free', {'unload_models': True, 'free_memory': True})
