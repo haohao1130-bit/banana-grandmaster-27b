@@ -5,7 +5,6 @@ import uuid
 from pathlib import Path
 
 from banana_mv.commission_guard import check_commission, role_pictures, wardrobe_for_clip
-from banana_mv.clip_cast import explicit_bindings, clip_visibility
 from banana_mv.core import map_image_mentions, normalize_mv_prompt
 from banana_mv.director import MODES
 from banana_mv.lyrics_reference import SUBJECT_VOCAL_PREFIX, clean_lyric_output, excerpt, vocal_timeline
@@ -578,10 +577,6 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     # Read explicit singer mappings BEFORE stripping global SRT and future-story
     # sections; then forward only canonical, static role/image identities.
     source_singers=role_pictures(fixed_setup)
-    # 12B accepts explicit image/role aliases from the author's original brief
-    # even when the story allocator rewrites SETUP and drops their punctuation.
-    author_singers=explicit_bindings(req.get('prompt',''),len(originals))
-    source_singers.update(author_singers)
     event = _local_event(row['event'])
     vocals = vocal_timeline(excerpt(req, segment))
     context = {'authored_vocal_timeline': vocals, 'ending': clip_ending(req, segment)}
@@ -603,34 +598,16 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     # final H3 sections. 9B owns the number and timing of CAMERA cuts. Never
     # convert an SRT handoff into a compulsory new shot.
     # All other legacy and unscripted routes stay unchanged.
-    # SRT labels are explicit user-authority; a stage image is not a third
-    # singer. Preserve legacy solo jobs without inventing a second vocalist.
-    tagged = [SUBJECT_VOCAL_PREFIX.match(c.get('text',''))
-              for c in (req.get('srt_cues') or [])]
-    tagged_roles = {role.strip().upper() for m in tagged if m
-                    for role in m.group(1).split('+')}
-    route_candidate = (req.get('director_schema') == 6 and len(originals) >= 2
-                       and bool(tagged_roles))
-    if route_candidate and {'S1', 'S2'} <= tagged_roles and not {'S1', 'S2'} <= set(pictures):
-        # Do not turn a parser limitation into a fatal 29-clip production error.
-        # The legacy general route still works for genuinely ambiguous briefs;
-        # leave a visible diagnostic without guessing who owns which picture.
-        segment['cast_binding_warning'] = (
-            '角色標籤未能解析；沿用一般拍攝流程，請核對聲部與圖片身份。')
-    else:
-        segment.pop('cast_binding_warning', None)
-    if route_candidate and {'S1', 'S2'} <= set(pictures):
-        # Python-owned SRT/camera route is mandatory for resolved two-singer
-        # clips, including those with additional location reference images.
-        # Inspect the original unshifted picture slots: a continuation tail
-        # shifts H3 Picture indices, never the author's event bindings.
-        access=clip_visibility(event,req.get('prompt',''),segment,source_singers,vocals)
+    if (req.get('director_schema') == 6 and len(originals) == 2
+            and {'S1', 'S2'} <= set(pictures)
+            and req.get('srt_cues')
+            and any(SUBJECT_VOCAL_PREFIX.match(c.get('text',''))
+                    for c in req['srt_cues'])):
         refs = ([tail] if tail else []) + list(originals)
         segment['director_mode'] = row['mode']
         native = write_director_shoot_prompt(
             cfg, req, segment, event, fixed_setup, pictures, wardrobe, refs,
-            _pictures(refs), rewrite, progress,
-            visibility=access, continuation=bool(tail))
+            _pictures(refs), rewrite, progress)
         native, removed = clean_lyric_output(
             native, dict(req, lyrics_reference_version=2))
         segment['lyric_reference_cleanup'] = {'removed_spans': removed}
