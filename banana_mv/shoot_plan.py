@@ -637,7 +637,11 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
           "Respect explicit shot requests, reference constraints and the guide's transition rules.\n"
           + continuation_note
           + "Original prompt:\nCurrent clip script:\n"+connected(event)+"\n\n")
-    text+="""Enhance this ONE clip script into the guide's final native H3 filming prompt,
+    text+="""For a normal 10-second clip, aim for a concise final six-section H3
+prompt around 1000–1500 tokens. This is a SOFT writing goal, not a fixed cap:
+preserve all current-event actions, connected identities, required shot structure,
+audio contract and precise SRT vocal windows. Avoid repeating descriptions.
+Enhance this ONE clip script into the guide's final native H3 filming prompt,
 including its per-shot composition, lighting, actions and camera movement.
 The current clip script alone assigns plot events. Fixed reference settings carry
 identity and scene duties, never permission to perform a future ending. If old
