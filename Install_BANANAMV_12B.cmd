@@ -10,7 +10,7 @@ if not exist "F:\" (
     pause
     exit /b 1
 )
-if exist "%APP%\tools\install_12b.ps1" goto RUN
+if exist "%APP%\tools\install_12b.ps1" goto UPDATE
 where git >nul 2>&1
 if errorlevel 1 goto FETCH
 if exist "%APP%" (
@@ -20,7 +20,7 @@ if exist "%APP%" (
 )
 echo Cloning Gemma 12B experiment branch using Git credentials...
 git clone --single-branch --branch "%BRANCH%" "%REPO%" "%APP%"
-if not errorlevel 1 goto RUN
+if not errorlevel 1 goto UPDATE
 :FETCH
 echo Trying public installer bootstrap...
 set "BOOTSTRAP=%TEMP%\BANANAMV_12B_install.ps1"
@@ -32,6 +32,10 @@ if errorlevel 1 (
 )
 set "INSTALLER=%BOOTSTRAP%"
 goto INSTALL
+:UPDATE
+echo Checking for 12B installer fixes...
+git -C "%APP%" pull --ff-only origin "%BRANCH%"
+if errorlevel 1 echo WARNING: Could not auto-update; local changes or network may need attention.
 :RUN
 set "INSTALLER=%APP%\tools\install_12b.ps1"
 :INSTALL
