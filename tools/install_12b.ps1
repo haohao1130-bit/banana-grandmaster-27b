@@ -205,6 +205,14 @@ try {
         }
         if (!(Test-Path $llamaExe)) { throw 'Downloaded llama.cpp archive does not contain llama-server.exe' }
     }
+    # A present EXE is not proof it can use RTX CUDA. Verify before installing
+    # very large model weights; never substitute a CPU-only llama.cpp binary.
+    Write-Host 'Checking llama.cpp CUDA device visibility...'
+    $cudaDevices = (& $llamaExe --list-devices 2>&1 | Out-String)
+    if ($LASTEXITCODE -ne 0 -or $cudaDevices -notmatch 'CUDA0:') {
+        throw "llama.cpp did not detect NVIDIA CUDA0. Check Runtime/llama.cpp DLLs and CUDA 13 release. Output: $cudaDevices"
+    }
+    Write-Host ($cudaDevices.Trim())
     # CPU music parser remains isolated from the GPU video environment.
     $musicPython = Join-Path $Runtime 'music-venv\Scripts\python.exe'
     if (!(Test-Path $musicPython)) {
