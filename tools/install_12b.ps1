@@ -75,9 +75,10 @@ try {
         "  vae: '$(RelativeToF $resolved.vae_video)'"
         "  loras: '$(RelativeToF $resolved.lora_combat)'"
     ) -join [Environment]::NewLine
-    foreach ($extra in @(@('vae_audio','vae'),@('lora_repair','loras'))) {
-        $name = $extra[0]
-        $category = $extra[1]
+    foreach ($pair in @('vae_audio|vae','lora_repair|loras')) {
+        $entry = $pair.Split('|')
+        $name = $entry[0]
+        $category = $entry[1]
         $yaml += [Environment]::NewLine + 'banana12b_' + $name + ':' +
             [Environment]::NewLine + '  base_path: "F:/"' +
             [Environment]::NewLine + '  ' + $category + ": '$(RelativeToF $resolved[$name])'"
