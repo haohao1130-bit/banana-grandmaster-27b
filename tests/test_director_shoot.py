@@ -74,6 +74,23 @@ class FreeDirectorShotsTests(unittest.TestCase):
         self.assertNotIn('LOCKED SHOT SLOTS', commission)
         self.assertIn('YOU CHOOSE SHOT COUNT', commission)
 
+    def test_more_than_twelve_camera_cuts_have_no_artificial_cap(self):
+        # Deliberately exercise 14 author-selected shots. Timecodes remain valid,
+        # but shot count is no longer an arbitrary upper-bound failure.
+        lines = ['detailed_description:']
+        for n in range(1, 15):
+            if n == 1:
+                lines.append('[Shot 1] The actor moves across the temple yard.')
+            else:
+                second = (n - 1) * 0.5
+                lines.append(f'[Shot {n}] At 00:{second:06.3f}, '
+                             f'New meaningful camera angle {n} follows the ongoing action.')
+        blocks, slots = parse_director_shots('\\n'.join(lines), 10, [])
+        self.assertEqual(len(slots), 14)
+        self.assertEqual(slots[0]['start'], 0.0)
+        self.assertEqual(slots[-1]['start'], 6.5)
+        self.assertIn('New meaningful camera angle 14', blocks[14])
+
     def test_one_take_is_valid_even_when_singer_changes(self):
         cues = [cue(0, 4, 'S2'), cue(4.5, 10, 'S1')]
         response = (
