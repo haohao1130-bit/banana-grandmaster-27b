@@ -91,6 +91,59 @@ class FreeDirectorShotsTests(unittest.TestCase):
         self.assertEqual(slots[-1]['start'], 6.5)
         self.assertIn('New meaningful camera angle 14', blocks[14])
 
+    def test_12b_missing_cut_timestamps_do_not_trigger_whole_clip_rewrite(self):
+        # This is the failure from the 29-segment 12B run: Shot 2 exists but
+        # Gemma does not spell its cut as 'At mm:ss.mmm'.
+        draft = (
+            'subject_definitions:\nTwo singers.\nsummary:\nCurrent scene.\n'
+            'retention_analysis:\n<Audio 1>: fully_copy.\n'
+            'detailed_description:\n'
+            '[Shot 1] The white snake faces the temple, rain streaking the stone.\n'
+            '[Shot 2] Camera shifts to her three-quarter close-up as she reacts.\n'
+            'overall_soundscape:\nSource track.\n'
+            'non_diegetic_music:\nSource track.')
+        calls = []
+        def director(cfg, system, parts, job):
+            calls.append(parts)
+            return draft
+        request = {'srt_cues': [
+            {'start': 0, 'end': 10, 'text': '[S2] 千年劫'}],
+            'rewrite_retries': 5, 'dynamic_cuts': True}
+        seg = {'index': 0, 'start': 0, 'seconds': 10}
+        result = write_director_shoot_prompt(
+            self.config, request, seg,
+            'The white snake advances towards the temple in the rain.',
+            self.fixed, self.cast, {}, ['snake', 'monk'],
+            [], director)
+        self.assertEqual(len(calls), 1, 'Missing time metadata must not restart the director')
+        self.assertIn('[Shot 2] At 00:05.000', result)
+        self.assertEqual(seg['prompt_profile']['director_shot_count'], 2)
+
+    def test_12b_mixed_cut_times_are_preserved_and_missing_ones_interpolated(self):
+        raw = (
+            'detailed_description:\n'
+            '[Shot 1] The actor begins a forward tracking action.\n'
+            '[Shot 2] At 00:04.500, New side perspective shows the encounter.\n'
+            '[Shot 3] Reverse camera angle catches the response.\n'
+            '[Shot 4] At 00:08.000, Wide lens reveals its consequence.\n'
+            'overall_soundscape:\nOriginal track.'
+        )
+        blocks, slots = parse_director_shots(raw, 10, [])
+        self.assertEqual([row['start'] for row in slots], [0, 4.5, 6.25, 8.0])
+        self.assertEqual(len(blocks), 4)
+
+    def test_12b_accepts_common_director_clock_notations(self):
+        raw = (
+            'detailed_description:\n'
+            '[Shot 1] Wide establishing shot.\n'
+            '[Shot 2] 3s: Tracking beside the performer.\n'
+            '[Shot 3] (00:06.500–00:09.000) Close-up reaction.\n'
+            'overall_soundscape:\nOriginal track.'
+        )
+        blocks, slots = parse_director_shots(raw, 10, [])
+        self.assertEqual([row['start'] for row in slots], [0, 3.0, 6.5])
+        self.assertIn('Close-up reaction', blocks[3])
+
     def test_one_take_is_valid_even_when_singer_changes(self):
         cues = [cue(0, 4, 'S2'), cue(4.5, 10, 'S1')]
         response = (
