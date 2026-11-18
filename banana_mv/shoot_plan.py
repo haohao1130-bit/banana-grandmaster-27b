@@ -612,10 +612,13 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     route_candidate = (req.get('director_schema') == 6 and len(originals) >= 2
                        and bool(tagged_roles))
     if route_candidate and {'S1', 'S2'} <= tagged_roles and not {'S1', 'S2'} <= set(pictures):
-        raise SceneStateError(
-            '27B 雙人 SRT 缺少明確 S1/S2 對應圖片；請在故事開頭標註'
-            ' @圖片1＝角色名、S1＝角色名，以及 @圖片2／S2。'
-            '禁止退回無角色隔離的一般改寫流程。')
+        # Do not turn a parser limitation into a fatal 29-clip production error.
+        # The legacy general route still works for genuinely ambiguous briefs;
+        # leave a visible diagnostic without guessing who owns which picture.
+        segment['cast_binding_warning'] = (
+            '角色標籤未能解析；沿用一般拍攝流程，請核對聲部與圖片身份。')
+    else:
+        segment.pop('cast_binding_warning', None)
     if route_candidate and {'S1', 'S2'} <= set(pictures):
         # Python-owned SRT/camera route is mandatory for resolved two-singer
         # clips, including those with additional location reference images.
