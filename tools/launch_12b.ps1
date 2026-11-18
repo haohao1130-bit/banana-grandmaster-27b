@@ -100,7 +100,7 @@ if (@($mustHave | Where-Object { !(Test-Path -LiteralPath (Join-Path $models $_)
     & $python (Join-Path $app 'tools\install_12b_models.py') --models-root $models
     if ($LASTEXITCODE -ne 0) { throw 'Model repair failed; rerun installer.' }
 }
-# Reuse the original successful 5070 9B H3 T8 custom nodes without installing anything.
+# Reuse the working RTX5070 9B T8 plugin path, without copying or reinstalling it.
 $existingNodeHomes = @(
     (Join-Path $env:USERPROFILE 'Documents\ComfyUI\custom_nodes'),
     (Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'ComfyUI\custom_nodes'),
@@ -111,98 +111,12 @@ $existing9bNodes = $null
 foreach ($candidate in ($existingNodeHomes | Select-Object -Unique)) {
     if (!(Test-Path -LiteralPath $candidate -PathType Container)) { continue }
     $t8 = Get-ChildItem -LiteralPath $candidate -Directory -ErrorAction SilentlyContinue |
-        Where-Object { $_.Name -match '(?i)^minimax[-_]h3[-_]audio[-_]t8
-$config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=$inputDir;
-             free_after_rewrite=$true;
-             rewriter=@{ model=$env:BANANA_12B_MODEL; mmproj=$env:BANANA_12B_MMPROJ;
-                         server=$env:BANANA_12B_SERVER; port=8217; gpu_layers=99;
-                         context=16384; max_length=4096; temperature=0.4; top_p=0.8 } }
-if (Test-Path $configFile) {
-    $old = Get-Content -Raw -LiteralPath $configFile | ConvertFrom-Json
-    if ($old.rewriter) {
-        foreach ($key in @('gpu_layers','context','max_length','temperature','top_p')) {
-            if ($null -ne $old.rewriter.$key) {
-                # Dedicated 12B installation: keep intentional local tuning.
-                $config.rewriter[$key] = $old.rewriter.$key
-            }
-        }
-    }
-}
-[System.IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 16), (New-Object System.Text.UTF8Encoding($false)))
-# Do not adopt the old 27B/9B ComfyUI that happens to be listening on 8218.
-# Such a server has a different input folder and model search path.
-$existingComfy = Get-NetTCPConnection -LocalPort 8218 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
-if ($existingComfy) {
-    $ownerPid = [int]$existingComfy.OwningProcess
-    $ownerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
-    if (!$ownerProcess -or !$ownerProcess.CommandLine -or
-        $ownerProcess.CommandLine.IndexOf($comfy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0 -or
-        $ownerProcess.CommandLine.IndexOf($Root, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
-        throw "Port 8218 belongs to a different ComfyUI/process (PID $ownerPid). Close the old studio first; nothing was terminated."
-    }
-}
-# Previous failed boots can leave a 12B-only 8218 process without T8.
-# Restart ONLY verified 12B-owned ComfyUI, and only when it has no active work.
-if ($existingComfy -and $nodePathChanged) {
-    try { $queue = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/queue' -TimeoutSec 5 }
-    catch { throw 'Cannot verify existing 12B ComfyUI queue is idle; no process was stopped.' }
-    if (($queue.queue_running -and @($queue.queue_running).Count -gt 0) -or
-        ($queue.queue_pending -and @($queue.queue_pending).Count -gt 0)) {
-        throw '12B ComfyUI has running or pending work; refusing to restart it.'
-    }
-    Write-Host "Restarting idle 12B ComfyUI PID $ownerPid to load existing 9B T8."
-    Stop-Process -Id $ownerPid -ErrorAction Stop
-    $stopDeadline = (Get-Date).AddSeconds(30)
-    while ((Get-Date) -lt $stopDeadline -and
-           (Get-NetTCPConnection -LocalPort 8218 -State Listen -ErrorAction SilentlyContinue)) {
-        Start-Sleep -Seconds 1
-    }
-    if (Get-NetTCPConnection -LocalPort 8218 -State Listen -ErrorAction SilentlyContinue) {
-        throw '12B ComfyUI did not release port 8218; no other process was stopped.'
-    }
-}
-try {
-    $nodes = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/object_info' -TimeoutSec 4
-} catch {
-    Write-Host 'Starting independent H3 ComfyUI on 8218 ...'
-    foreach ($folder in @($inputDir,$tempDir,$out)) { New-Item -ItemType Directory -Force -Path $folder | Out-Null }
-    $comfyArgs = @('-u', ('"' + (Join-Path $comfy 'main.py') + '"'),
-                   '--base-directory', ('"' + $comfy + '"'),
-                   '--extra-model-paths-config', ('"' + $yaml + '"'),
-                   '--input-directory', ('"' + $inputDir + '"'),
-                   '--output-directory', ('"' + $out + '"'),
-                   '--temp-directory', ('"' + $tempDir + '"'),
-                   '--listen','127.0.0.1','--port','8218','--lowvram','--preview-method','none')
-    $proc = Start-Process -FilePath $python -ArgumentList $comfyArgs -WorkingDirectory $comfy -PassThru -RedirectStandardOutput (Join-Path $logs 'comfy.stdout.log') -RedirectStandardError (Join-Path $logs 'comfy.stderr.log')
-    $deadline = (Get-Date).AddMinutes(5)
-    $nodes = $null
-    while (!$nodes -and (Get-Date) -lt $deadline) {
-        if ($proc.HasExited) { throw 'ComfyUI exited unexpectedly; inspect Logs/comfy.stderr.log' }
-        Start-Sleep 3
-        try { $nodes = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/object_info' -TimeoutSec 3 }
-        catch { }
-    }
-}
-if (!$nodes) { throw 'Independent ComfyUI did not start; see Logs.' }
-foreach ($node in @('MiniMaxH3AudioConditioningT8','CLIPLoader','UNETLoader','ModelAttentionBackend')) {
-    if (!$nodes.PSObject.Properties[$node]) { throw "H3 node unavailable: $node. Inspect Logs/comfy.stderr.log; do not redownload H3 models." }
-}
-Write-Host 'Shared original 5070 ComfyUI code, 12B listener: http://127.0.0.1:8218'
-Write-Host '12B Director: owned process on port 8217, launched on demand.'
-Write-Host 'BANANAMV 12B: http://127.0.0.1:8193'
-if (!$NoBrowser) { Start-Process 'http://127.0.0.1:8193' }
-# Restore known-working 12B startup (same as first successful director shot).
-# Do not supervise, terminate, or restart this server from a second process.
-Write-Host '12B startup: direct backend (restart supervisor disabled for stability test).'
-Push-Location $app
-try { & $python -u -m banana_mv.server }
-finally { Pop-Location }
- } |
+        Where-Object { $_.Name -match '(?i)^minimax[-_]h3[-_]audio[-_]t8$' } |
         Select-Object -First 1
     if ($t8) { $existing9bNodes = $candidate; break }
 }
 if (!$existing9bNodes) {
-    throw 'Existing 9B MiniMax H3 T8 source not found. Inspect the successful 9B custom_nodes location; 12B will not download or alter it.'
+    throw 'Existing 9B H3 T8 custom node source not found; refusing to download or modify the original 9B install.'
 }
 $blockBegin = '# BANANA12B_EXISTING_9B_NODES_BEGIN'
 $blockEnd = '# BANANA12B_EXISTING_9B_NODES_END'
@@ -220,7 +134,7 @@ $nodePathChanged = ($yamlBefore -cne $yamlAfter)
 if ($nodePathChanged) {
     [IO.File]::WriteAllText($yaml,$yamlAfter,(New-Object System.Text.UTF8Encoding($false)))
 }
-Write-Host "12B shares the 9B H3 custom nodes read-only: $existing9bNodes"
+Write-Host "12B reuses 9B H3 custom nodes: $existing9bNodes"
 
 $configFile = Join-Path $data 'config.json'
 $config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=$inputDir;
@@ -252,6 +166,25 @@ if ($existingComfy) {
         throw "Port 8218 belongs to a different ComfyUI/process (PID $ownerPid). Close the old studio first; nothing was terminated."
     }
 }
+# A failed earlier boot may leave 8218 alive without T8. Restart ONLY our own idle 12B process.
+if ($existingComfy -and $nodePathChanged) {
+    try { $queue = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/queue' -TimeoutSec 5 }
+    catch { throw 'Cannot confirm the 12B ComfyUI queue is idle; no process was stopped.' }
+    if (($queue.queue_running -and @($queue.queue_running).Count -gt 0) -or
+        ($queue.queue_pending -and @($queue.queue_pending).Count -gt 0)) {
+        throw '12B ComfyUI has active/pending work; refusing to restart it.'
+    }
+    Write-Host "Restarting verified idle 12B ComfyUI PID $ownerPid to register 9B T8."
+    Stop-Process -Id $ownerPid -ErrorAction Stop
+    $stopDeadline = (Get-Date).AddSeconds(30)
+    while ((Get-Date) -lt $stopDeadline -and
+           (Get-NetTCPConnection -LocalPort 8218 -State Listen -ErrorAction SilentlyContinue)) {
+        Start-Sleep -Seconds 1
+    }
+    if (Get-NetTCPConnection -LocalPort 8218 -State Listen -ErrorAction SilentlyContinue) {
+        throw '12B ComfyUI did not release 8218; no other process was stopped.'
+    }
+}
 try {
     $nodes = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/object_info' -TimeoutSec 4
 } catch {
@@ -276,7 +209,7 @@ try {
 }
 if (!$nodes) { throw 'Independent ComfyUI did not start; see Logs.' }
 foreach ($node in @('MiniMaxH3AudioConditioningT8','CLIPLoader','UNETLoader','ModelAttentionBackend')) {
-    if (!$nodes.PSObject.Properties[$node]) { throw "H3 missing required node: $node. Run installer." }
+    if (!$nodes.PSObject.Properties[$node]) { throw "H3 node unavailable: $node. Inspect Logs/comfy.stderr.log; do not redownload H3 models." }
 }
 Write-Host 'Shared original 5070 ComfyUI code, 12B listener: http://127.0.0.1:8218'
 Write-Host '12B Director: owned process on port 8217, launched on demand.'
