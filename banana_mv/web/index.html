@@ -58,7 +58,7 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #f4
 }
 #recipe-review{scroll-margin-top:16px;margin:12px 0 18px}#recipe-text{max-height:min(52vh,520px);overflow-y:auto;padding:12px;border-radius:10px;background:#151611;border:1px solid #514a3c}#furnace-stop-controls{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin:10px 0 6px}#furnace-stop-controls button{width:100%;margin:0;min-width:0}#furnace-stop-controls .emergency-stop{background:#a82424;color:#fff;border:2px solid #f29c95;box-shadow:0 0 0 1px #55100f;font-weight:800}#furnace-stop-controls .emergency-stop:hover:not(:disabled){background:#c32727}#furnace-stop-controls .emergency-stop:focus-visible{outline:3px solid #ffb6b0}#stop-feedback{margin:0 0 12px;min-height:1.4em}@media(max-width:640px){#furnace-stop-controls{grid-template-columns:1fr}}#event-plan-details{border:1px solid #806739;border-radius:12px;background:#252219;padding:12px 14px;margin:16px 0}#event-plan-details>summary{font-weight:700;color:#edca74;font-size:16px;line-height:1.6}#event-plan-details>p{font-size:13px;margin:10px 0}#event-plan-text{max-height:340px;overflow-y:auto;background:#171713;border:1px solid #514a3c;border-radius:9px;padding:12px;font-size:13px;line-height:1.65}#status{max-height:340px;overflow-y:auto;padding-right:6px;overscroll-behavior:contain}
 </style>
-<header class="studio-header"><div class="brand"><span class="brand-logo" role="img" aria-label="香蕉">🍌</span><div><small class="brand-name">Banana</small><h1>大乘蕉宗MV製作所｜27B實驗片場</h1></div></div><div class="studio-tools"><span id="build-info" class="build-info" aria-label="目前程式版本" title="從本機 Git 讀取">版本讀取中…</span><button id="switch-to-film" type="button" class="secondary" hidden disabled title="切換服務尚未啟用">切換至一鍵短片</button><button id="restart-5070" type="button" class="secondary" disabled title="正在確認本機 V4 管家狀態">↻ 重啟丹爐（檢查中）</button><button id="open-help" type="button" class="secondary" aria-haspopup="dialog" aria-controls="help-dialog">📖 操作說明</button><button id="copy-ai-guide" type="button" class="secondary" aria-describedby="ai-guide-copy-status">🤖 一鍵複製給 AI</button><span id="ai-guide-copy-status" class="muted" role="status" aria-live="polite"></span></div></header><div id="ai-guide-fallback-box" class="card" hidden><label for="ai-guide-fallback">無法自動複製時，請自行複製下方文字</label><textarea id="ai-guide-fallback" rows="8" readonly></textarea></div>
+<header class="studio-header"><div class="brand"><span class="brand-logo" role="img" aria-label="香蕉">🍌</span><div><small class="brand-name">Banana</small><h1>大乘蕉宗MV製作所｜27B實驗片場</h1></div></div><div class="studio-tools"><span id="build-info" class="build-info" aria-label="目前程式版本" title="從本機 Git 讀取">版本讀取中…</span><button id="switch-to-film" type="button" class="secondary" hidden disabled title="切換服務尚未啟用">切換至一鍵短片</button><button id="restart-5070" type="button" class="secondary" disabled title="正在確認 27B 獨立重啟管理程序">↻ 重啟丹爐（檢查中）</button><button id="open-help" type="button" class="secondary" aria-haspopup="dialog" aria-controls="help-dialog">📖 操作說明</button><button id="copy-ai-guide" type="button" class="secondary" aria-describedby="ai-guide-copy-status">🤖 一鍵複製給 AI</button><span id="ai-guide-copy-status" class="muted" role="status" aria-live="polite"></span></div></header><div id="ai-guide-fallback-box" class="card" hidden><label for="ai-guide-fallback">無法自動複製時，請自行複製下方文字</label><textarea id="ai-guide-fallback" rows="8" readonly></textarea></div>
 <main><section class="card"><h2>參考圖就位，歌曲開唱。</h2><span class="tag">大乘蕉宗 · 27B Q4_K_M 專屬實驗爐</span>
 <form id="form"><label for="project-name">專案名稱（選填）</label><input id="project-name" type="text" maxlength="120" placeholder="留空使用歌曲檔名"><h3>參考圖片｜依控制詞編號逐格選取</h3><p class="muted">每格只選一張。把角色、道具或場景放進對應的 @圖片N 欄位；更換或清除一格，不會移動其他圖片。</p><div id="reference-slots" class="reference-slots"><div class="reference-slot" id="reference-slot-1"><label for="image">圖片1 · @圖片1（必填）</label><input id="image" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-1"></div><p id="image-name-1" class="muted">尚未選圖</p><button id="remove-image-1" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-2"><label for="image-2">圖片2 · @圖片2（選填）</label><input id="image-2" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-2"></div><p id="image-name-2" class="muted">尚未選圖</p><button id="remove-image-2" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-3"><label for="image-3">圖片3 · @圖片3（選填）</label><input id="image-3" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-3"></div><p id="image-name-3" class="muted">尚未選圖</p><button id="remove-image-3" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-4"><label for="image-4">圖片4 · @圖片4（選填）</label><input id="image-4" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-4"></div><p id="image-name-4" class="muted">尚未選圖</p><button id="remove-image-4" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-5"><label for="image-5">圖片5 · @圖片5（選填）</label><input id="image-5" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-5"></div><p id="image-name-5" class="muted">尚未選圖</p><button id="remove-image-5" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-6"><label for="image-6">圖片6 · @圖片6（選填）</label><input id="image-6" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-6"></div><p id="image-name-6" class="muted">尚未選圖</p><button id="remove-image-6" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-7"><label for="image-7">圖片7 · @圖片7（選填）</label><input id="image-7" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-7"></div><p id="image-name-7" class="muted">尚未選圖</p><button id="remove-image-7" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-8"><label for="image-8">圖片8 · @圖片8（選填）</label><input id="image-8" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-8"></div><p id="image-name-8" class="muted">尚未選圖</p><button id="remove-image-8" type="button" class="secondary" hidden>清除此格</button></div><div class="reference-slot" id="reference-slot-9"><label for="image-9">圖片9 · @圖片9（選填）</label><input id="image-9" type="file" accept="image/png,image/jpeg,image/webp"><div id="image-preview-9"></div><p id="image-name-9" class="muted">尚未選圖</p><button id="remove-image-9" type="button" class="secondary" hidden>清除此格</button></div></div><p id="reference-help" class="muted" aria-live="polite"></p>
 <label>原歌曲（最多 5 分鐘）</label><input id="song" type="file" accept="audio/*" required>
@@ -296,24 +296,24 @@ async function updateRestartControl(){
   const state=await api('api/mv/restart-capability',{cache:'no-store'});
   button.hidden=false;
   button.disabled=!state.available||!!state.busy;
-  button.textContent=!state.available?'↻ 重啟丹爐（需 V4 管家）':state.busy?'↻ 重啟丹爐（任務中）':'↻ 重啟丹爐';
-  button.title=state.reason||'停止並重啟 5070 專屬服務；共用的 ComfyUI 不會被誤關';
+  button.textContent=!state.available?'↻ 重啟丹爐（需 27B 管家）':state.busy?'↻ 重啟丹爐（任務中）':'↻ 重啟丹爐';
+  button.title=state.reason||'重新啟動獨立 27B 網頁服務；保留現有 ComfyUI、模型與專案';
  }catch(_){
   button.hidden=false;
   button.disabled=true;
   button.textContent='↻ 重啟丹爐（狀態未知）';
-  button.title='無法讀取本機管家狀態，請確認 5070 服務後手動重新啟動。';
+  button.title='無法讀取 27B 重啟管理程序，請用獨立 27B 桌面捷徑啟動。';
  }
 }
 $('restart-5070').onclick=async()=>{
  const button=$('restart-5070');
  if(button.disabled||restartInProgress)return;
- if(!window.confirm('確定要完整重新啟動 BANANAMV 5070？\n\n只有在沒有生成任務時才會執行。由 V4 管家啟動的 ComfyUI 也會重啟；若 ComfyUI 原本是別的程式啟動，則保留它。'))return;
+ if(!window.confirm('確定要重新啟動 BANANAMV 27B 網頁服務？\n\n只在沒有生成任務時執行。27B 導演會安全卸載；獨立的 H3 ComfyUI、已下載模型及全部專案檔案都保留。'))return;
  restartInProgress=true;
  button.disabled=true;button.textContent='正在重啟…';
  try{
-  const result=await api('api/mv/restart',{method:'POST',headers:{'Content-Type':'application/json','X-Banana-Control':'5070-restart'},body:JSON.stringify({confirm:'restart-5070'})});
-  message('5070 管家已收到要求，正在重新啟動服務；網頁會在恢復後重新載入。');
+  const result=await api('api/mv/restart',{method:'POST',headers:{'Content-Type':'application/json','X-Banana-Control':'27b-restart'},body:JSON.stringify({confirm:'restart-27b'})});
+  message('27B 管家已接收要求，正在重新啟動獨立服務；恢復後網頁會重新載入。');
   clearTimeout(timer);
   const end=Date.now()+180000;
   while(Date.now()<end){
@@ -334,7 +334,7 @@ $('restart-5070').onclick=async()=>{
     }
    }catch(_){}
   }
-  message('重啟未在網頁等待期限內完成。請確認 5070 管家視窗是否仍在執行。');
+  message('27B 重啟尚未完成，請檢查電腦上的 27B 管家視窗。');
  }catch(error){message(error.message);}
  restartInProgress=false;
  button.textContent='↻ 重啟丹爐';
