@@ -32,6 +32,17 @@ def explicit_bindings(brief, count):
     direct = role_pictures(text)
     images, names = {}, {}
     for line in text.splitlines():
+        # Original full-song briefs use: S1＝蕉大師＝@圖片1,
+        # S2＝白素貞＝@圖片2. The user names in the middle are identity
+        # labels, not an error or a reason to reject the whole MV.
+        # map_image_mentions() already converted @圖片N to <Picture N>.
+        role_line = re.match(r"^\s*\[?\s*(S[12])\s*\]?\s*[=:：＝]\s*(.+)$", line, re.I)
+        if role_line:
+            references = set(PRESENT_REF.findall(role_line.group(2)))
+            if len(references) == 1:
+                number = int(next(iter(references)))
+                if 1 <= number <= count:
+                    direct.setdefault(role_line.group(1).upper(), f"<Picture {number}>")
         p = PICTURE.match(line)
         if p and 1 <= int(p[1]) <= count:
             name = _name(p[2])
