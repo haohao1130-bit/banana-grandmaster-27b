@@ -24,6 +24,25 @@ class ExplicitCastTests(unittest.TestCase):
         self.assertEqual(explicit_bindings(WHITE_SNAKE, 2),
                          {"S1": "<Picture 1>", "S2": "<Picture 2>"})
 
+    def test_actual_full_mv_prompt_s1_name_picture_binding(self):
+        # This is the literal format ChatGPT authored for the user's 29-clip MV.
+        brief = (
+            "S1＝蕉大師＝@圖片1\n"
+            "S2＝白素貞＝@圖片2\n"
+            "@圖片3＝古寺舞台\n"
+        )
+        self.assertEqual(explicit_bindings(brief, 3),
+                         {"S1": "<Picture 1>", "S2": "<Picture 2>"})
+
+    def test_named_inline_roles_with_picture_first_and_no_guessing(self):
+        brief = (
+            "@圖片1＝蕉大師，S1\n"
+            "@圖片2＝白素貞，S2\n"
+            "@圖片3＝寺廟外景\n"
+        )
+        self.assertEqual(explicit_bindings(brief, 3),
+                         {"S1": "<Picture 1>", "S2": "<Picture 2>"})
+
     def test_separate_name_lines_and_extra_stage_image(self):
         brief = ("@圖片1 蕉大師\nS1 蕉大師\n"
                  "@圖片2 白素貞\nS2 白素貞\n"
