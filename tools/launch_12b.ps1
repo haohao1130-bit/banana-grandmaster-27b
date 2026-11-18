@@ -13,6 +13,13 @@ $data = Join-Path $Root 'Data'
 $logs = Join-Path $Root 'Logs'
 $out = Join-Path $Root 'Output'
 $yaml = Join-Path $runtime 'extra_model_paths.yaml'
+# Portable FFmpeg comes from this studio's installer, never rely on winget PATH.
+$ffmpegBin = Join-Path $runtime 'ffmpeg\bin'
+if (!(Test-Path (Join-Path $ffmpegBin 'ffmpeg.exe')) -or
+    !(Test-Path (Join-Path $ffmpegBin 'ffprobe.exe'))) {
+    throw "12B FFmpeg runtime missing. Rerun Install_BANANAMV_12B.cmd."
+}
+$env:PATH = "$ffmpegBin;$env:PATH"
 # The phone/Tailscale frontend is fixed to 8193, matching existing 5070 URLs.
 # Do not terminate the original MV or FILM if they currently own this listener.
 $portCheck = New-Object System.Net.Sockets.TcpClient
