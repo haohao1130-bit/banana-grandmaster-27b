@@ -253,7 +253,7 @@ def _pictures(originals):
 
 
 def _text(raw):
-    if not isinstance(raw,str):raise SceneStateError('9B 需回傳文字。')
+    if not isinstance(raw,str):raise SceneStateError('12B 需回傳文字。')
     text=re.sub(r'<think>.*?</think>','',raw,flags=re.S).strip()
     return re.sub(r'^```\w*\s*\n|\n```\s*$','',text).strip()
 
@@ -754,7 +754,7 @@ Return only the native filming prompt, no analysis, JSON or management instructi
                 if repair_count >= 2:
                     if fresh_retries >= retry_limit:
                         raise SceneStateError(
-                            f'9B 拍攝稿與當段通告衝突；局部修稿兩輪後重新起稿 {fresh_retries} 次仍未通過：'
+                            f'12B 拍攝稿與當段通告衝突；局部修稿兩輪後重新起稿 {fresh_retries} 次仍未通過：'
                             + ' | '.join(problems))
                     fresh_retries += 1
                     repair_count = 0
@@ -772,7 +772,7 @@ Return only the native filming prompt, no analysis, JSON or management instructi
             segment.pop('commission_guard_errors', None)
             return prompt
         except ValueError as error:
-            if isinstance(error, SceneStateError) and str(error).startswith('9B 拍攝稿與當段通告衝突'):
+            if isinstance(error, SceneStateError) and str(error).startswith('12B 拍攝稿與當段通告衝突'):
                 raise
             if fresh_retries >= retry_limit:
                 raise SceneStateError('當段拍攝稿交稿失敗：'+str(error)) from error
