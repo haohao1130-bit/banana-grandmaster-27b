@@ -39,7 +39,9 @@ class ServicesTests(unittest.TestCase):
                 path.write_text(json.dumps({'rewriter': {'context': 8192, 'gpu_layers': 12}}))
                 migrated = services.load_config()['rewriter']
                 self.assertEqual(migrated['context'], 32768)
-                self.assertEqual(migrated['gpu_layers'], 'auto')
+                self.assertEqual(migrated['gpu_layers'], 35)
+                path.write_text(json.dumps({'rewriter': {'context': 32768, 'gpu_layers': 'auto'}}))
+                self.assertEqual(services.load_config()['rewriter']['gpu_layers'], 35)
                 path.write_text(json.dumps({'rewriter': {'context': 32768, 'gpu_layers': 25}}))
                 self.assertEqual(services.load_config()['rewriter']['gpu_layers'], 25)
                 path.write_text(json.dumps({'rewriter': {'context': 65536}}))
