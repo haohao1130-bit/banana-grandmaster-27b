@@ -53,7 +53,7 @@ def _settings(cfg):
         "mmproj": Path(os.environ.get("BANANA_12B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
         "gpu_layers": _gpu_layers(rw.get("gpu_layers", 99)),
         "context": int(rw.get("context", 16384)),
-        "max_tokens": int(rw.get("max_length", 4096)),
+        "max_tokens": int(rw.get("max_length", 8192)),
         "temperature": float(rw.get("temperature", 0.4)),
         "top_p": float(rw.get("top_p", 0.8)),
     }
