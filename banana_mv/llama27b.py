@@ -26,9 +26,9 @@ _CANCELLED = threading.Event()
 
 
 def _gpu_layers(value):
-    """Accept native llama.cpp auto-fit, or a user-chosen nonnegative layer cap."""
+    """Use a bounded fixed GPU-layer target; keep user numeric caps."""
     if value is None or str(value).strip().lower() == "auto":
-        return "auto"
+        return 35
     try:
         n = int(value)
     except (TypeError, ValueError) as exc:
@@ -49,7 +49,7 @@ def _settings(cfg):
         "exe": Path(os.environ.get("BANANA_27B_SERVER") or rw.get("server") or DEFAULT_SERVER),
         "model": Path(os.environ.get("BANANA_27B_MODEL") or rw.get("model") or DEFAULT_MODEL),
         "mmproj": Path(os.environ.get("BANANA_27B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
-        "gpu_layers": _gpu_layers(rw.get("gpu_layers", "auto")),
+        "gpu_layers": _gpu_layers(rw.get("gpu_layers", 35)),
         "context": int(rw.get("context", 32768)),
         "max_tokens": int(rw.get("max_length", 4096)),
         "temperature": float(rw.get("temperature", 0.4)),
@@ -70,8 +70,8 @@ def _health(s, timeout=2):
 
 
 def _launch_args(s):
-    # Recent official llama.cpp supports -ngl auto with memory auto-fit.
-    # Keep the explicitly requested 32K context. Do not force 8K for speed:
+    # Limit offload to 35 layers rather than unrestricted auto GPU layers.
+    # Retain 32K context; llama.cpp fitting may lower actual GPU layers if needed.
     # the current multimodal commission can exceed 9K input tokens.
     return [str(s["exe"]), "-m", str(s["model"]), "--mmproj", str(s["mmproj"]),
             "--host", s["host"], "--port", str(s["port"]),
