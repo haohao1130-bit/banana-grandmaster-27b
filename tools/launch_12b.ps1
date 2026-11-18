@@ -53,9 +53,9 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
     if (!$afterUpdate) { $afterUpdate = '' }
 }
 if ($beforeUpdate -and $afterUpdate -and $beforeUpdate -ne $afterUpdate -and
-    $env:BANANA_27B_LAUNCH_RELOADED -ne '1') {
+    $env:BANANA_12B_LAUNCH_RELOADED -ne '1') {
     Write-Host '12B updated; reloading the new launcher before starting services.'
-    $env:BANANA_27B_LAUNCH_RELOADED = '1'
+    $env:BANANA_12B_LAUNCH_RELOADED = '1'
     & (Join-Path $app 'tools\launch_12b.ps1') -Root $Root -NoBrowser:$NoBrowser
     exit $LASTEXITCODE
 }
@@ -107,6 +107,17 @@ if (Test-Path $configFile) {
     }
 }
 [System.IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 16), (New-Object System.Text.UTF8Encoding($false)))
+# Do not adopt the old 27B/9B ComfyUI that happens to be listening on 8218.
+# Such a server has a different input folder and model search path.
+$existingComfy = Get-NetTCPConnection -LocalPort 8218 -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($existingComfy) {
+    $ownerPid = [int]$existingComfy.OwningProcess
+    $ownerProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerPid" -ErrorAction SilentlyContinue
+    if (!$ownerProcess -or !$ownerProcess.CommandLine -or
+        $ownerProcess.CommandLine.IndexOf($comfy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) {
+        throw "Port 8218 belongs to a different ComfyUI/process (PID $ownerPid). Close the old studio first; nothing was terminated."
+    }
+}
 try {
     $nodes = Invoke-RestMethod -Uri 'http://127.0.0.1:8218/object_info' -TimeoutSec 4
 } catch {
@@ -131,7 +142,7 @@ foreach ($node in @('MiniMaxH3AudioConditioningT8','CLIPLoader','UNETLoader','Mo
 }
 Write-Host 'Independent H3 ComfyUI: http://127.0.0.1:8218'
 Write-Host '12B Director: owned process on port 8217, launched on demand.'
-Write-Host 'BANANAMV 27B: http://127.0.0.1:8193'
+Write-Host 'BANANAMV 12B: http://127.0.0.1:8193'
 if (!$NoBrowser) { Start-Process 'http://127.0.0.1:8193' }
 # Restore known-working 12B startup (same as first successful director shot).
 # Do not supervise, terminate, or restart this server from a second process.
