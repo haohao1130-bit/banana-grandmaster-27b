@@ -131,18 +131,25 @@ def visibility_lines(access):
     return out
 
 
-def premature_cast_errors(blocks, access):
-    """Only flag unambiguously absent Subject references; avoid false semantic guesses."""
+def premature_cast_errors(blocks, access, slots=()):
+    """Reject absent cast, including shots ending before a timed first entrance."""
     errors = {}
+    by_number = {row["number"]: row for row in slots}
     for role, number in (("S1", 1), ("S2", 2)):
-        if access[role]["status"] != "absent":
+        state = access[role]
+        if state["status"] not in ("absent", "entry"):
             continue
         mention = re.compile(r"<Subject\s+"+str(number)+r">", re.I)
         for shot, body in blocks.items():
-            if mention.search(body):
+            slot = by_number.get(shot)
+            premature = state["status"] == "absent" or (
+                state["status"] == "entry" and slot and
+                float(slot["end"]) <= float(state["at"]) + 0.001
+            )
+            if premature and mention.search(body):
                 errors.setdefault(shot, []).append(
                     f"[ERROR][PrematureCast] [Shot {shot}] <Subject {number}> ({role}) "
-                    "is not present in this clip. Remove this actor from the entire "
-                    "shot, including reaction, background, silhouette and reflections; "
-                    "retain the event and camera framing for authorized performers.")
+                    "must remain offscreen until its authorized first appearance. "
+                    "Remove this actor from the shot, including reactions, background "
+                    "and reflections; preserve the authorized ongoing event and camera.")
     return errors
