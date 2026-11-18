@@ -578,7 +578,7 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     # Read explicit singer mappings BEFORE stripping global SRT and future-story
     # sections; then forward only canonical, static role/image identities.
     source_singers=role_pictures(fixed_setup)
-    # 27B accepts explicit image/role aliases from the author's original brief
+    # 12B accepts explicit image/role aliases from the author's original brief
     # even when the story allocator rewrites SETUP and drops their punctuation.
     author_singers=explicit_bindings(req.get('prompt',''),len(originals))
     source_singers.update(author_singers)
