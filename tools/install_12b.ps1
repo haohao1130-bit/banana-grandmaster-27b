@@ -40,8 +40,74 @@ try {
         }
     }
     Require-Tool 'git' 'Git.Git'
-    Require-Tool 'ffmpeg' 'Gyan.FFmpeg'
-    Require-Tool 'ffprobe' 'Gyan.FFmpeg'
+    # Winget returns a nonzero "no upgrade available" code when Gyan.FFmpeg
+    # is already installed but ffmpeg is not visible in this PowerShell PATH.
+    # Do not use winget for FFmpeg: stage both tools inside this 12B runtime.
+    $ffmpegBin = Join-Path $Runtime 'ffmpeg\\bin'
+    $localFFmpeg = Join-Path $ffmpegBin 'ffmpeg.exe'
+    $localFFprobe = Join-Path $ffmpegBin 'ffprobe.exe'
+    New-Item -ItemType Directory -Force -Path $ffmpegBin | Out-Null
+    if (!(Test-Path $localFFmpeg) -or !(Test-Path $localFFprobe)) {
+        $sourceDir = $null
+        $cmdFFmpeg = Get-Command ffmpeg.exe -ErrorAction SilentlyContinue
+        if ($cmdFFmpeg -and (Test-Path -LiteralPath (Join-Path (Split-Path $cmdFFmpeg.Source) 'ffprobe.exe'))) {
+            $sourceDir = Split-Path $cmdFFmpeg.Source
+        }
+        if (!$sourceDir) {
+            # An installed winget package may not have exported PATH aliases.
+            $wingetRoots = @(
+                (Join-Path $env:LOCALAPPDATA 'Microsoft\\WinGet\\Packages'),
+                (Join-Path $env:ProgramFiles 'WinGet\\Packages')
+            )
+            foreach ($packageRoot in $wingetRoots) {
+                if (!$packageRoot -or !(Test-Path $packageRoot)) { continue }
+                $matches = @(Get-ChildItem -LiteralPath $packageRoot -Filter 'ffmpeg.exe' -Recurse -File -ErrorAction SilentlyContinue |
+                    Where-Object { $_.DirectoryName -match 'Gyan\\.FFmpeg' -or $_.DirectoryName -match 'ffmpeg' } |
+                    Select-Object -First 5)
+                foreach ($entry in $matches) {
+                    if (Test-Path -LiteralPath (Join-Path $entry.DirectoryName 'ffprobe.exe')) {
+                        $sourceDir = $entry.DirectoryName
+                        break
+                    }
+                }
+                if ($sourceDir) { break }
+            }
+        }
+        if ($sourceDir) {
+            Write-Host "Using existing FFmpeg files from $sourceDir"
+            Copy-Item -LiteralPath (Join-Path $sourceDir 'ffmpeg.exe') -Destination $localFFmpeg -Force
+            Copy-Item -LiteralPath (Join-Path $sourceDir 'ffprobe.exe') -Destination $localFFprobe -Force
+        } else {
+            # Self-contained fallback: no system PATH edits or winget upgrade.
+            Write-Host 'FFmpeg not on PATH; downloading portable FFmpeg to this studio only...'
+            $zip = Join-Path $Cache 'ffmpeg-release-essentials.zip'
+            if (!(Test-Path $zip) -or (Get-Item $zip).Length -lt 1000000) {
+                $partial = "$zip.partial"
+                Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+                Invoke-WebRequest -UseBasicParsing -Uri 'https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip' -OutFile $partial
+                if ((Get-Item $partial).Length -lt 1000000) { throw 'Portable FFmpeg download incomplete' }
+                Move-Item -LiteralPath $partial -Destination $zip -Force
+            }
+            $unpack = Join-Path $Cache 'ffmpeg-extract'
+            if (Test-Path $unpack) { Remove-Item -LiteralPath $unpack -Recurse -Force }
+            Expand-Archive -LiteralPath $zip -DestinationPath $unpack -Force
+            $candidate = Get-ChildItem -LiteralPath $unpack -Filter 'ffmpeg.exe' -Recurse -File |
+                Where-Object { Test-Path -LiteralPath (Join-Path $_.DirectoryName 'ffprobe.exe') } |
+                Select-Object -First 1
+            if (!$candidate) { throw 'Portable FFmpeg archive missing ffmpeg.exe/ffprobe.exe pair' }
+            Copy-Item -LiteralPath $candidate.FullName -Destination $localFFmpeg -Force
+            Copy-Item -LiteralPath (Join-Path $candidate.DirectoryName 'ffprobe.exe') -Destination $localFFprobe -Force
+            Remove-Item -LiteralPath $unpack -Recurse -Force
+        }
+    }
+    if (!(Test-Path $localFFmpeg) -or !(Test-Path $localFFprobe)) {
+        throw 'Cannot provision isolated ffmpeg and ffprobe binaries.'
+    }
+    $env:PATH = "$ffmpegBin;$env:PATH"
+    & $localFFmpeg -version | Select-Object -First 1
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated ffmpeg.exe validation failed' }
+    & $localFFprobe -version | Select-Object -First 1
+    if ($LASTEXITCODE -ne 0) { throw 'Isolated ffprobe.exe validation failed' }
     function Python312 {
         if (Get-Command py -ErrorAction SilentlyContinue) {
             $p = (& py -3.12 -c 'import sys; print(sys.executable)' 2>$null | Select-Object -Last 1)
