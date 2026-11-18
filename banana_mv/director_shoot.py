@@ -1,7 +1,7 @@
-"""5070: let 9B direct camera cuts; Python still owns SRT, cast and wardrobe.
+"""5070: let 12B direct camera cuts; Python still owns SRT, cast and wardrobe.
 
 Unlike the older locked_shoot.plan_slots path, a vocal handoff is never a
-camera-cut instruction. 9B chooses the shot count, positions and timing from
+camera-cut instruction. 12B chooses the shot count, positions and timing from
 the isolated current-clip event.  Python validates shot clocks and keeps the
 independently timed SRT vocal list in the final H3 prompt.
 """
@@ -36,8 +36,9 @@ DIRECTOR_SYSTEM = (
     'retention_analysis, detailed_description, overall_soundscape, '
     'non_diegetic_music. In detailed_description use sequential [Shot N] '
     'labels, one paragraph per meaningful camera shot. Shot 1 begins at '
-    '0 seconds; every subsequent [Shot N] must begin with '
-    'At mm:ss.mmm, and its cinematic action. You may write just [Shot 1]. '
+    '0 seconds. Later shots may give local cut times (At mm:ss.mmm), '
+    'but a missing timestamp does not invalidate the visual shot. '
+    'You may write just [Shot 1]. '
     'Do not copy previous/future plot, add performers or change outfits. '
     'The final fixed H3 identity/audio sections are supplied by Python.'
 )
@@ -48,13 +49,54 @@ REPAIR_SYSTEM = (
     'Return the native six-section H3 format with exactly the requested '
     '[Shot N] in detailed_description. No new shots or dialogue.'
 )
+# The 5070 one-click director owns the camera count. Gemma may describe cuts
+# without the exact "At mm:ss.mmm," spelling used by the old 12B frontend.
+# Keep its chosen shots; accept normal clocks, and infer ONLY missing cut times.
 CLOCK = re.compile(
-    r'^\s*(?:At\s+)?(?P<minutes>\d{1,2}):(?P<seconds>\d{2}'
-    r'(?:\.\d{1,3})?)\s*[,;:]\s*', re.I
+    r'^\s*(?:At\s+|Time\s*[:：]\s*)?[\[(]?\s*'
+    r'(?:(?P<minutes>\d{1,2}):(?P<seconds>\d{2}(?:[.,]\d{1,3})?)'
+    r'|(?P<plain>\d{1,2}(?:\.\d{1,3})?)\s*(?:s|sec|seconds|秒))'
+    r'(?:\s*[-–—~至]\s*(?:\d{1,2}:)?\d{1,2}(?:\.\d{1,3})?\s*(?:s|sec|秒)?)?'
+    r'\s*[)\]]?\s*[,;:：\-–—]?\s*', re.I
 )
 
+
+def _clock_seconds(clock):
+    if clock.group('plain') is not None:
+        return float(clock.group('plain'))
+    return 60 * int(clock.group('minutes')) + float(
+        clock.group('seconds').replace(',', '.'))
+
+
+def _fill_missing_cut_times(parts, duration):
+    """Preserve director-selected shot count and explicit local cut points.
+
+    Undated [Shot N] is a formatting variance, NOT a reason to regenerate a
+    whole H3 prompt. Assign its timestamp between the nearest explicit anchors.
+    This never adds or removes shots, changes story beats, or uses SRT as cuts.
+    """
+    count = len(parts)
+    if not count:
+        return parts
+    anchors = [(0, 0.0)]
+    for index in range(1, count):
+        stamp = parts[index][1]
+        if stamp is not None and anchors[-1][1] < stamp < duration:
+            anchors.append((index, stamp))
+        else:
+            # Local time omitted/out of order/out of range: repair metadata only.
+            parts[index] = (parts[index][0], None, parts[index][2])
+    anchors.append((count, duration))
+    for (left_index, left_time), (right_index, right_time) in zip(anchors, anchors[1:]):
+        for index in range(left_index + 1, right_index):
+            chosen = round(left_time + (right_time - left_time)
+                           * (index - left_index) / (right_index - left_index), 3)
+            parts[index] = (parts[index][0], chosen, parts[index][2])
+    return parts
+
+
 def parse_director_shots(raw, seconds, cues, scene_schedule=()):
-    """Parse 9B-authored CAMERA cuts; do not divide shots at SRT boundaries."""
+    """Parse 12B-authored CAMERA cuts; do not divide shots at SRT boundaries."""
     text = re.sub(r'<think>.*?</think>', '', raw, flags=re.I | re.S)
     has_native = bool(re.search(r'(?im)^\s*detailed_description\s*:', text))
     if has_native:
@@ -65,36 +107,35 @@ def parse_director_shots(raw, seconds, cues, scene_schedule=()):
         )[0]
     labels = list(SHOT.finditer(text))
     if not labels:
-        # A single unlabelled native detailed_description is a legitimate
-        # ONE-SHOT film; unlike a five-shot camera template, do not invent cuts.
+        # A single unlabelled H3 detailed_description is a valid one-shot film.
         if not has_native or not text.strip():
-            raise ValueError('9B must supply a detailed_description and [Shot 1].')
+            raise ValueError('12B must supply a detailed_description for this clip.')
         parts = [(1, 0.0, text.strip())]
     else:
         parts = []
         for i, mark in enumerate(labels, 1):
             number = int(mark[1])
             if number != i:
-                raise ValueError('9B shots must be sequential [Shot 1], [Shot 2]...')
+                raise ValueError('12B camera shot numbers must be sequential.')
             body = text[mark.end():labels[i].start() if i < len(labels) else len(text)].strip()
             clock = CLOCK.match(body)
             if i == 1:
                 start = 0.0
                 if clock:
-                    start = round(int(clock['minutes']) * 60 + float(clock['seconds']), 3)
+                    first_time = _clock_seconds(clock)
+                    if abs(first_time) > 0.001:
+                        raise ValueError('First camera shot must start at 0 seconds.')
                     body = body[clock.end():].strip()
-                if abs(start) > 0.001:
-                    raise ValueError('First camera shot must start at 0 seconds.')
             else:
-                if not clock:
-                    raise ValueError(f'[Shot {i}] needs At mm:ss.mmm camera cut time.')
-                start = round(int(clock['minutes']) * 60 + float(clock['seconds']), 3)
-                body = body[clock.end():].strip()
-                if start <= parts[-1][1] + 0.001 or start >= float(seconds) - 0.01:
-                    raise ValueError('9B camera shot cut times must strictly increase inside this clip.')
+                # Time is optional for 12B; preserve the shot and infer local cut
+                # metadata only when the director did not supply a usable clock.
+                start = round(_clock_seconds(clock), 3) if clock else None
+                if clock:
+                    body = body[clock.end():].strip()
             if not body:
-                raise ValueError(f'[Shot {i}] is empty.')
+                raise ValueError(f'[Shot {i}] has no camera/action description.')
             parts.append((number, start, body))
+        parts = _fill_missing_cut_times(parts, float(seconds))
     for scene in list(scene_schedule)[1:]:
         cut = float(scene['start'])
         if cut < 0.001 or cut >= float(seconds):
@@ -201,7 +242,7 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
         'ACT ONLY ON THIS CURRENT CLIP EVENT:',
         event,
         '',
-        '=== 3. 9B CINEMATOGRAPHY — YOU CHOOSE SHOT COUNT AND CUT TIMES ===',
+        '=== 3. 12B CINEMATOGRAPHY — YOU CHOOSE SHOT COUNT AND CUT TIMES ===',
         'Choose meaningful camera cuts ONLY when the visual storytelling needs them.',
         'DO NOT make a new Shot when the camera simply pushes closer to the '
         'same pose/face and nothing meaningful changes.',
@@ -216,7 +257,7 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
         'identity/wardrobe/audio sections, so spend creativity on '
         'detailed_description: camera position, action, expression, consequence.',
         'Use [Shot 1] for the first shot (starts at 0.000s). '
-        'For EACH later camera CUT label [Shot N] At mm:ss.mmm, ...',
+        'For each later camera CUT, label [Shot N] and describe the visual event; give a local cut time if known. Python can fill missing time labels without changing your camera choices.',
         'One-shot is valid: output only [Shot 1], no forced [Shot 2]. '
         'Choose the number of meaningful shots that the current clip actually needs; there is no fixed shot count or artificial maximum.',
         'Camera energy: ' + str(req.get('intensity', 'high')) + '.',
@@ -236,7 +277,7 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
 
 def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
                                 wardrobe, refs, images, rewrite, progress=None):
-    """Actual 5070 two-singer path: independent SRT windows + 9B camera."""
+    """Actual 5070 two-singer path: independent SRT windows + 12B camera."""
     cues = vocal_timeline(excerpt(req, segment))
     schedule = scene_wardrobe_schedule(event, fixed, pictures, segment['seconds'])
     if schedule:
@@ -261,10 +302,9 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
         blocks = None
         slots = None
         why = ''
-        for attempt in range(3):
+        for attempt in range(2):
             prompt = (task if not why else task + '\nFORMAT REMINDER: ' + why
-                      + '\nReissue the SIX H3 sections. You choose the Shot count. '
-                      'All non-first shots require At mm:ss.mmm.')
+                      + '\nReissue the SIX H3 sections. You choose the Shot count.')
             try:
                 blocks, slots = parse_director_shots(
                     call(images + [('text', prompt)], .4 if attempt == 0 else .15),
@@ -275,9 +315,8 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
         if blocks is not None:
             max_calls = max(max_calls, calls + (retry_limit + 1) * 2 * len(slots))
         if blocks is None:
-            if restart < retry_limit:
-                continue
-            raise SceneStateError('9B 無法安排有效自由攝影鏡位：' + why)
+            # Do not retry a whole expensive clip for the same layout failure.
+            raise SceneStateError('12B 無法讀取本段攝影稿：' + why)
 
         blocks, vocal_fixes = _safe_vocals(blocks, slots, fixed)
         failure = None
@@ -290,7 +329,7 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
             ]
             if attempt >= 2:
                 failure = SceneStateError(
-                    '9B 局部修稿仍有服裝或人物衝突：'
+                    '12B 局部修稿仍有服裝或人物衝突：'
                     + ' | '.join(segment['commission_guard_errors']))
                 break
             for number, messages in errors.items():
@@ -315,7 +354,7 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
                     vocal_fixes.extend(fixes)
                 except ValueError as error:
                     failure = SceneStateError(
-                        f'9B 第 {number} 鏡修稿格式錯誤：{error}')
+                        f'12B 第 {number} 鏡修稿格式錯誤：{error}')
                     break
             if failure is not None:
                 break
@@ -323,7 +362,7 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
             if restart < retry_limit:
                 continue
             raise SceneStateError(
-                f'9B 自動重新起稿 {restart} 次後仍未通過：{failure}') from failure
+                f'12B 自動重新起稿 {restart} 次後仍未通過：{failure}') from failure
         segment.pop('commission_guard_errors', None)
         segment['vocal_auto_corrections'] = vocal_fixes
         segment['prompt_profile'] = {
