@@ -338,6 +338,515 @@ def split_source(prompt):
     return fixed, chapters
 
 
+# One-click 5070 compatibility only. The author uses timed 【ACT 01｜...】
+# headings; hand the same unchanged events to the existing proven allocator.
+_BRACKETED_TIMED_ACT = re.compile(
+    r'(?im)^\s*【(?P<title>ACT\s+\d+\s*[|｜:：\-—]\s*'
+    r'\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?\s*[-–—－~～至]\s*'
+    r'\d{1,2}:\d{2}(?::\d{2})?(?:\.\d+)?[^】]*)】\s*
+    """At least one slot per chapter when possible; allocate the rest by weight."""
+    if not chapters or slots <= 0:
+        raise ValueError('分段數量不正確。')
+    if len(chapters) > slots:
+        return None  # Chapters are merged chronologically, not dropped.
+    counts = [1] * len(chapters)
+    left = slots - len(chapters)
+    weights = [math.sqrt(max(1, len(c['actions']))) for c in chapters]
+    total = sum(weights)
+    raw = [left*w/total for w in weights]
+    bases = [int(v) for v in raw]
+    counts = [a+b for a,b in zip(counts, bases)]
+    remain = left-sum(bases)
+    order = sorted(range(len(chapters)), key=lambda j: (-(raw[j]-bases[j]), j))
+    for j in order[:remain]:
+        counts[j] += 1
+    return counts
+
+
+def mode_for(event, req):
+    user_mode = req.get('director', 'auto')
+    if user_mode != 'auto' and user_mode in MODES:
+        return user_mode
+    if re.search(r'唱|歌|RAP|舞台|主唱|副歌|SING|VOCAL|CHORUS', event, re.I):
+        return 'performance'
+    if re.search(r'拳|戰|打|擊|爆炸|追逐|衝刺|FIGHT|BOX|EXPLODE', event, re.I):
+        return 'action'
+    if re.search(r'變身|法術|魔法|幻影|量子|MAGIC', event, re.I):
+        return 'fantasy'
+    return 'story'
+
+
+def commission(chapter, chapter_slot, chapter_slots, previous):
+    """Split actions by order; avoid copying the entire act to every slot."""
+    # Scope notes describe already-achieved results, not filmable actions.
+    actions = [action for action in chapter['actions'] if not SCOPE_NOTE.match(action)]
+    size = len(actions)
+    begin = (chapter_slot*size)//chapter_slots
+    end = ((chapter_slot+1)*size)//chapter_slots
+    local = actions[begin:end]
+    if not local:
+        local = [
+            'Develop fresh anticipation, environmental interaction and character '
+            'behavior within this chapter without performing its NEXT listed '
+            'turning point. Keep the current causal state advancing.'
+        ]
+    instructions = [
+        'PYTHON-OWNED SOURCE INTERVAL — film ONLY this local commission.',
+        'Source chapter: '+chapter['title'],
+        'Phase inside chapter: '+str(chapter_slot+1)+' of '+str(chapter_slots)+'.',
+    ]
+    if previous:
+        instructions.append('ALREADY ESTABLISHED; do not restage or repeat: '+previous)
+    instructions.extend([
+        'Current interval actions in original order:',
+        *('- '+action for action in local),
+        'Stage these actions with physical cause, response and visible consequence.',
+        'Carry resulting positions, props and emotions forward; no future chapter, '
+        'premature victory, repeated finale or arbitrary reset.',
+    ])
+    # Handoff the last character event, not a camera move or a chapter note.
+    previous_result = next((action for action in reversed(local)
+                            if not re.match(r'^(?:攝影機|鏡頭|機位|運鏡|畫面)', action)),
+                           previous)
+    return '\n'.join(instructions), previous_result
+
+
+def ensure_python_slot_plan(req, segments, originals, work):
+    """Save a deterministic 1:1 plan. Calls no rewrite/model/backend service."""
+    if not segments:
+        raise SceneStateError('缺少歌曲分段。')
+    count = len(originals)
+    brief = map_image_mentions(req.get('prompt', ''), count)
+    contract = ending_contract(req, segments[-1]['start']+segments[-1]['seconds'], segments)
+    task = {
+        'format': 'python_owned_slots_v1',
+        'brief': brief,
+        'style': req.get('director', 'auto'),
+        'adaptation': 'FREE' if req.get('story_plan', True) else 'FAITHFUL',
+        'timeline': [{k:s[k] for k in ('index', 'start', 'seconds')} for s in segments],
+        'ending_contract': contract,
+    }
+    fingerprint = digest(task)
+    path = Path(work)/'director_plan.json'
+    if path.is_file():
+        saved = json.loads(path.read_text(encoding='utf-8'))
+        if (saved.get('version') != 6 or saved.get('input_sha256') != fingerprint or
+                saved.get('content_sha256') != digest({
+                    k:v for k,v in saved.items()
+                    if k not in ('content_sha256', 'input_sha256')})):
+            raise SceneStateError('實驗版 Python 槽位與保存的丹方不一致；不覆蓋原始計畫。')
+        return saved
+
+    # Explicit Markdown chapter timestamps outrank text-count allocation.
+    # Preserve the proven legacy allocator for non-timecoded source scripts.
+    timed = parse_timed_source(_normalize_authored_act_notation(brief),
+                               authored_intervals=req.get('direct_script', False))
+    fixed, chapters = timed if timed is not None else split_source(
+        brief if brief.strip() or not req.get('direct_script') else
+        'The lead performer in <Picture 1> lip-syncs to <Audio 1> in the supplied setting.')
+    fixed = normalize_mv_prompt(fixed, count) if fixed else ''
+    short_tail = (timed is None and bool(contract.get('short_tail_seconds', 0))
+                  and len(segments)>1)
+    usable = len(segments)-int(short_tail)
+    counts = span_counts(chapters, usable) if timed is None else None
+    allocated = []
+    previous = ''
+    authored_cues = timed is not None and req.get('direct_script', False)
+    if authored_cues:
+        allocated = allocate_authored_cues(chapters, segments)
+    elif timed is not None:
+        allocated = allocate_timed_chapters(chapters, segments, commission, req.get('srt_cues'))
+    elif counts is not None:
+        for chapter, slots in zip(chapters, counts):
+            for j in range(slots):
+                event, previous = commission(chapter, j, slots, previous)
+                allocated.append(event)
+    else:
+        # Very short excerpts with more source chapters than technical slots:
+        # merge adjacent source chapters into the available slots without losing
+        # user actions or reordering them.
+        source = [(c['title'], a) for c in chapters for a in c['actions']]
+        for i in range(usable):
+            start = (i*len(source))//usable
+            end = ((i+1)*len(source))//usable
+            chunk = source[start:end]
+            lines = ['PYTHON-OWNED SOURCE INTERVAL — film ONLY these actions.']
+            if previous:
+                lines.append('ALREADY ESTABLISHED; do not restage: '+previous)
+            lines.extend('- '+title+' | '+action for title,action in chunk)
+            previous = chunk[-1][1] if chunk else previous
+            allocated.append('\n'.join(lines))
+    if len(allocated) != usable:
+        raise SceneStateError('Python 槽位未能覆蓋完整來源時間軸。')
+
+    slot_events = list(allocated)
+    if len(slot_events) < len(segments):
+        slot_events.append('SOURCE SONG SHORT TAIL — continuation ONLY.\n'
+                           'The previous full interval established the decisive outcome. '
+                           'Sustain and develop its immediate visual consequence, never '
+                           'replay the decisive event or introduce a new finale.\n'
+                           'Previously established: '+previous)
+    filmed_events = slot_events if authored_cues else _inject_actor_state(slot_events, fixed, chapters)
+    rows = []
+    for seg, source_event, event in zip(segments, slot_events, filmed_events):
+        rows.append({
+            'index': seg['index'], 'mode': mode_for(source_event, req),
+            'handoff_version': 1,
+            **({'authored_cues': True} if authored_cues else {}),
+            'event': normalize_mv_prompt(event, count),
+        })
+    plan = {
+        'version': 6,
+        'engine': 'python_owned_slots_v1',
+        'source_timing': 'explicit_markdown' if timed is not None else 'legacy_ordered',
+        'shared_setup': fixed,
+        'segments': rows,
+        'visual_verified': False,
+        'ending_contract': contract,
+        'project_scope': req.get('project_scope', 'full'),
+    }
+    plan['content_sha256'] = digest(plan)
+    plan['input_sha256'] = fingerprint
+    atomic_json(path, plan)
+    return plan
+
+
+def refresh_stale_timed_plan(job, originals, work):
+    """Upgrade an old *saved* legacy-ordered plan without touching rendered media.
+
+    Called only from an idle, GPU-locked action or when entering the existing
+    worker on resume. Recompute remaining commissions from author scene clocks
+    and SRT. Archive both old plan AND status for exact rollback/debug.
+    Returns False if the job is not the affected Python-slot branch.
+    """
+    if job.get('request',{}).get('director_schema') != 6:
+        return False
+    work=Path(work)
+    path=work/'director_plan.json'
+    if not path.is_file():
+        return False
+    saved=json.loads(path.read_text(encoding='utf-8'))
+    if saved.get('engine')!='python_owned_slots_v1' or saved.get('source_timing')!='legacy_ordered':
+        return False
+    req=job['request']
+    brief=map_image_mentions(req.get('prompt',''),len(originals))
+    if parse_timed_source(_normalize_authored_act_notation(brief),
+                          authored_intervals=req.get('direct_script',False)) is None:
+        return False
+
+    original=path.read_bytes()
+    suffix=str(saved.get('content_sha256','unknown'))[:12]
+    backup=work/('director_plan_before_timing_fix_'+suffix+'.json')
+    if not backup.exists():backup.write_bytes(original)
+    state_file=work/'status.json'
+    state_backup=work/('status_before_timing_fix_'+suffix+'.json')
+    if state_file.exists() and not state_backup.exists():
+        state_backup.write_bytes(state_file.read_bytes())
+    # Always derive a NEW plan from the user's unchanged source, never by
+    # editing or shifting the old event strings.
+    path.unlink()
+    try:
+        new=ensure_python_slot_plan(req,job['segments'],originals,work)
+        if new.get('source_timing')!='explicit_markdown' or len(new['segments'])!=len(job['segments']):
+            raise SceneStateError('重新分析的時間通告單缺少完整分段。')
+    except Exception:
+        path.write_bytes(original)
+        raise
+
+    completed=[]
+    refreshed=[]
+    for i,(seg,row) in enumerate(zip(job['segments'],new['segments'])):
+        if seg.get('status')=='done':
+            completed.append(i)
+        else:
+            refreshed.append(i)
+            seg['refresh_prompt']=True
+            seg.pop('prompt_id',None)
+            if isinstance(seg.get('prompt_rewrite'),dict):
+                seg['prompt_rewrite']['stale_plan']=True
+        seg['director_plan']=row
+        seg['fixed_reference_settings']=new.get('shared_setup','')
+        seg['direction_ending_contract']=new['ending_contract']
+        if i:
+            seg['previous_planned_event']=new['segments'][i-1]['event']
+    job['director_plan']={'version':new['version'],'status':'ready'}
+    job['timing_repair']={'source':'legacy_ordered','target':'explicit_markdown',
+                          'backup':backup.name,'status_backup':state_backup.name,
+                          'preserved_completed':completed,'refreshed_pending':refreshed}
+    # This is not a new creative screenplay approval; the user is restoring
+    # the exact timestamps from the screenplay they had already approved.
+    if job.get('plan_approved'):
+        from banana_mv import server as app
+        job['plan_approved']=app.plan_revision(job)
+    from banana_mv import server as app
+    app.write_state(job)
+    return True
+
+)
+_BRACKETED_AFTER_ACT_RULES = re.compile(
+    r'(?im)^\s*【(?P<title>H3\s*攝影與交稿規則)】\s*
+    """At least one slot per chapter when possible; allocate the rest by weight."""
+    if not chapters or slots <= 0:
+        raise ValueError('分段數量不正確。')
+    if len(chapters) > slots:
+        return None  # Chapters are merged chronologically, not dropped.
+    counts = [1] * len(chapters)
+    left = slots - len(chapters)
+    weights = [math.sqrt(max(1, len(c['actions']))) for c in chapters]
+    total = sum(weights)
+    raw = [left*w/total for w in weights]
+    bases = [int(v) for v in raw]
+    counts = [a+b for a,b in zip(counts, bases)]
+    remain = left-sum(bases)
+    order = sorted(range(len(chapters)), key=lambda j: (-(raw[j]-bases[j]), j))
+    for j in order[:remain]:
+        counts[j] += 1
+    return counts
+
+
+def mode_for(event, req):
+    user_mode = req.get('director', 'auto')
+    if user_mode != 'auto' and user_mode in MODES:
+        return user_mode
+    if re.search(r'唱|歌|RAP|舞台|主唱|副歌|SING|VOCAL|CHORUS', event, re.I):
+        return 'performance'
+    if re.search(r'拳|戰|打|擊|爆炸|追逐|衝刺|FIGHT|BOX|EXPLODE', event, re.I):
+        return 'action'
+    if re.search(r'變身|法術|魔法|幻影|量子|MAGIC', event, re.I):
+        return 'fantasy'
+    return 'story'
+
+
+def commission(chapter, chapter_slot, chapter_slots, previous):
+    """Split actions by order; avoid copying the entire act to every slot."""
+    # Scope notes describe already-achieved results, not filmable actions.
+    actions = [action for action in chapter['actions'] if not SCOPE_NOTE.match(action)]
+    size = len(actions)
+    begin = (chapter_slot*size)//chapter_slots
+    end = ((chapter_slot+1)*size)//chapter_slots
+    local = actions[begin:end]
+    if not local:
+        local = [
+            'Develop fresh anticipation, environmental interaction and character '
+            'behavior within this chapter without performing its NEXT listed '
+            'turning point. Keep the current causal state advancing.'
+        ]
+    instructions = [
+        'PYTHON-OWNED SOURCE INTERVAL — film ONLY this local commission.',
+        'Source chapter: '+chapter['title'],
+        'Phase inside chapter: '+str(chapter_slot+1)+' of '+str(chapter_slots)+'.',
+    ]
+    if previous:
+        instructions.append('ALREADY ESTABLISHED; do not restage or repeat: '+previous)
+    instructions.extend([
+        'Current interval actions in original order:',
+        *('- '+action for action in local),
+        'Stage these actions with physical cause, response and visible consequence.',
+        'Carry resulting positions, props and emotions forward; no future chapter, '
+        'premature victory, repeated finale or arbitrary reset.',
+    ])
+    # Handoff the last character event, not a camera move or a chapter note.
+    previous_result = next((action for action in reversed(local)
+                            if not re.match(r'^(?:攝影機|鏡頭|機位|運鏡|畫面)', action)),
+                           previous)
+    return '\n'.join(instructions), previous_result
+
+
+def ensure_python_slot_plan(req, segments, originals, work):
+    """Save a deterministic 1:1 plan. Calls no rewrite/model/backend service."""
+    if not segments:
+        raise SceneStateError('缺少歌曲分段。')
+    count = len(originals)
+    brief = map_image_mentions(req.get('prompt', ''), count)
+    contract = ending_contract(req, segments[-1]['start']+segments[-1]['seconds'], segments)
+    task = {
+        'format': 'python_owned_slots_v1',
+        'brief': brief,
+        'style': req.get('director', 'auto'),
+        'adaptation': 'FREE' if req.get('story_plan', True) else 'FAITHFUL',
+        'timeline': [{k:s[k] for k in ('index', 'start', 'seconds')} for s in segments],
+        'ending_contract': contract,
+    }
+    fingerprint = digest(task)
+    path = Path(work)/'director_plan.json'
+    if path.is_file():
+        saved = json.loads(path.read_text(encoding='utf-8'))
+        if (saved.get('version') != 6 or saved.get('input_sha256') != fingerprint or
+                saved.get('content_sha256') != digest({
+                    k:v for k,v in saved.items()
+                    if k not in ('content_sha256', 'input_sha256')})):
+            raise SceneStateError('實驗版 Python 槽位與保存的丹方不一致；不覆蓋原始計畫。')
+        return saved
+
+    # Explicit Markdown chapter timestamps outrank text-count allocation.
+    # Preserve the proven legacy allocator for non-timecoded source scripts.
+    timed = parse_timed_source(brief, authored_intervals=req.get('direct_script', False))
+    fixed, chapters = timed if timed is not None else split_source(
+        brief if brief.strip() or not req.get('direct_script') else
+        'The lead performer in <Picture 1> lip-syncs to <Audio 1> in the supplied setting.')
+    fixed = normalize_mv_prompt(fixed, count) if fixed else ''
+    short_tail = (timed is None and bool(contract.get('short_tail_seconds', 0))
+                  and len(segments)>1)
+    usable = len(segments)-int(short_tail)
+    counts = span_counts(chapters, usable) if timed is None else None
+    allocated = []
+    previous = ''
+    authored_cues = timed is not None and req.get('direct_script', False)
+    if authored_cues:
+        allocated = allocate_authored_cues(chapters, segments)
+    elif timed is not None:
+        allocated = allocate_timed_chapters(chapters, segments, commission, req.get('srt_cues'))
+    elif counts is not None:
+        for chapter, slots in zip(chapters, counts):
+            for j in range(slots):
+                event, previous = commission(chapter, j, slots, previous)
+                allocated.append(event)
+    else:
+        # Very short excerpts with more source chapters than technical slots:
+        # merge adjacent source chapters into the available slots without losing
+        # user actions or reordering them.
+        source = [(c['title'], a) for c in chapters for a in c['actions']]
+        for i in range(usable):
+            start = (i*len(source))//usable
+            end = ((i+1)*len(source))//usable
+            chunk = source[start:end]
+            lines = ['PYTHON-OWNED SOURCE INTERVAL — film ONLY these actions.']
+            if previous:
+                lines.append('ALREADY ESTABLISHED; do not restage: '+previous)
+            lines.extend('- '+title+' | '+action for title,action in chunk)
+            previous = chunk[-1][1] if chunk else previous
+            allocated.append('\n'.join(lines))
+    if len(allocated) != usable:
+        raise SceneStateError('Python 槽位未能覆蓋完整來源時間軸。')
+
+    slot_events = list(allocated)
+    if len(slot_events) < len(segments):
+        slot_events.append('SOURCE SONG SHORT TAIL — continuation ONLY.\n'
+                           'The previous full interval established the decisive outcome. '
+                           'Sustain and develop its immediate visual consequence, never '
+                           'replay the decisive event or introduce a new finale.\n'
+                           'Previously established: '+previous)
+    filmed_events = slot_events if authored_cues else _inject_actor_state(slot_events, fixed, chapters)
+    rows = []
+    for seg, source_event, event in zip(segments, slot_events, filmed_events):
+        rows.append({
+            'index': seg['index'], 'mode': mode_for(source_event, req),
+            'handoff_version': 1,
+            **({'authored_cues': True} if authored_cues else {}),
+            'event': normalize_mv_prompt(event, count),
+        })
+    plan = {
+        'version': 6,
+        'engine': 'python_owned_slots_v1',
+        'source_timing': 'explicit_markdown' if timed is not None else 'legacy_ordered',
+        'shared_setup': fixed,
+        'segments': rows,
+        'visual_verified': False,
+        'ending_contract': contract,
+        'project_scope': req.get('project_scope', 'full'),
+    }
+    plan['content_sha256'] = digest(plan)
+    plan['input_sha256'] = fingerprint
+    atomic_json(path, plan)
+    return plan
+
+
+def refresh_stale_timed_plan(job, originals, work):
+    """Upgrade an old *saved* legacy-ordered plan without touching rendered media.
+
+    Called only from an idle, GPU-locked action or when entering the existing
+    worker on resume. Recompute remaining commissions from author scene clocks
+    and SRT. Archive both old plan AND status for exact rollback/debug.
+    Returns False if the job is not the affected Python-slot branch.
+    """
+    if job.get('request',{}).get('director_schema') != 6:
+        return False
+    work=Path(work)
+    path=work/'director_plan.json'
+    if not path.is_file():
+        return False
+    saved=json.loads(path.read_text(encoding='utf-8'))
+    if saved.get('engine')!='python_owned_slots_v1' or saved.get('source_timing')!='legacy_ordered':
+        return False
+    req=job['request']
+    brief=map_image_mentions(req.get('prompt',''),len(originals))
+    if parse_timed_source(brief,authored_intervals=req.get('direct_script',False)) is None:
+        return False
+
+    original=path.read_bytes()
+    suffix=str(saved.get('content_sha256','unknown'))[:12]
+    backup=work/('director_plan_before_timing_fix_'+suffix+'.json')
+    if not backup.exists():backup.write_bytes(original)
+    state_file=work/'status.json'
+    state_backup=work/('status_before_timing_fix_'+suffix+'.json')
+    if state_file.exists() and not state_backup.exists():
+        state_backup.write_bytes(state_file.read_bytes())
+    # Always derive a NEW plan from the user's unchanged source, never by
+    # editing or shifting the old event strings.
+    path.unlink()
+    try:
+        new=ensure_python_slot_plan(req,job['segments'],originals,work)
+        if new.get('source_timing')!='explicit_markdown' or len(new['segments'])!=len(job['segments']):
+            raise SceneStateError('重新分析的時間通告單缺少完整分段。')
+    except Exception:
+        path.write_bytes(original)
+        raise
+
+    completed=[]
+    refreshed=[]
+    for i,(seg,row) in enumerate(zip(job['segments'],new['segments'])):
+        if seg.get('status')=='done':
+            completed.append(i)
+        else:
+            refreshed.append(i)
+            seg['refresh_prompt']=True
+            seg.pop('prompt_id',None)
+            if isinstance(seg.get('prompt_rewrite'),dict):
+                seg['prompt_rewrite']['stale_plan']=True
+        seg['director_plan']=row
+        seg['fixed_reference_settings']=new.get('shared_setup','')
+        seg['direction_ending_contract']=new['ending_contract']
+        if i:
+            seg['previous_planned_event']=new['segments'][i-1]['event']
+    job['director_plan']={'version':new['version'],'status':'ready'}
+    job['timing_repair']={'source':'legacy_ordered','target':'explicit_markdown',
+                          'backup':backup.name,'status_backup':state_backup.name,
+                          'preserved_completed':completed,'refreshed_pending':refreshed}
+    # This is not a new creative screenplay approval; the user is restoring
+    # the exact timestamps from the screenplay they had already approved.
+    if job.get('plan_approved'):
+        from banana_mv import server as app
+        job['plan_approved']=app.plan_revision(job)
+    from banana_mv import server as app
+    app.write_state(job)
+    return True
+
+)
+_INLINE_AUTHORED_SINGER = re.compile(
+    r'(?i)(?<![A-Za-z0-9])(S[12])\s*[=＝:：]\s*'
+    r'[^；;\n=＝:：]+?\s*[=＝:：]\s*(<Picture\s+\d+>)'
+)
+
+
+def _normalize_authored_act_notation(brief):
+    """Translate authored heading notation; preserve all events and times."""
+    if not _BRACKETED_TIMED_ACT.search(brief):
+        return brief
+    source = _BRACKETED_TIMED_ACT.sub(
+        lambda match: '### ' + match.group('title').strip(), brief)
+    source = _BRACKETED_AFTER_ACT_RULES.sub(
+        lambda match: '## ' + match.group('title').strip(), source)
+    aliases = {}
+    for match in _INLINE_AUTHORED_SINGER.finditer(source):
+        role, picture = match.group(1).upper(), match.group(2)
+        if role in aliases and aliases[role] != picture:
+            raise SceneStateError('原稿中的 S1/S2 圖片綁定互相衝突。')
+        aliases[role] = picture
+    if aliases:
+        source = '\n'.join(f'{role} = {picture}' for role, picture in sorted(aliases.items())) + '\n' + source
+    return source
+
+
 def span_counts(chapters, slots):
     """At least one slot per chapter when possible; allocate the rest by weight."""
     if not chapters or slots <= 0:
