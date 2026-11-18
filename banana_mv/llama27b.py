@@ -1,4 +1,4 @@
-"""Standalone, localhost-only Qwen3.5-27B GGUF director worker.
+"""Standalone, localhost-only Gemma 3 12B IT Q5_K_M GGUF director worker.
 
 Owns only the llama-server process it spawned. The worker survives consecutive
 clip-local rewrite retries, then must be stopped before ComfyUI H3 sampling.
@@ -15,10 +15,10 @@ import threading
 import time
 from urllib import error, request
 
-_ROOT = Path(os.environ.get("BANANA_27B_ROOT", r"F:\AI\BANANAMV_27B_STUDIO"))
+_ROOT = Path(os.environ.get("BANANA_12B_ROOT", r"F:\BANANAMV_12B_STUDIO"))
 DEFAULT_SERVER = _ROOT / "Runtime" / "llama.cpp" / "llama-server.exe"
-DEFAULT_MODEL = _ROOT / "Models" / "27B" / "Qwen3.5-27B-Q4_K_M.gguf"
-DEFAULT_MMPROJ = _ROOT / "Models" / "27B" / "mmproj-BF16.gguf"
+DEFAULT_MODEL = _ROOT / "Models" / "12B" / "google_gemma-3-12b-it-Q5_K_M.gguf"
+DEFAULT_MMPROJ = _ROOT / "Models" / "12B" / "mmproj-google_gemma-3-12b-it-f16.gguf"
 _LOCK = threading.RLock()
 _REQUEST_LOCK = threading.Lock()
 _PROC = None
@@ -26,31 +26,33 @@ _CANCELLED = threading.Event()
 
 
 def _gpu_layers(value):
-    """Request full CUDA layers by default; numeric caps remain supported."""
-    if value is None or str(value).strip().lower() in ("auto", "all"):
-        return 999
+    """Use 99 GPU layers as the full-offload target; allow custom caps."""
+    if value is None or str(value).strip().lower() == "all":
+        return 99
+    if str(value).strip().lower() == "auto":
+        return "auto"
     try:
         n = int(value)
     except (TypeError, ValueError) as exc:
-        raise ValueError("27B gpu_layers must be 'auto' or a nonnegative integer") from exc
+        raise ValueError("12B gpu_layers must be 'auto' or a nonnegative integer") from exc
     if n < 0:
-        raise ValueError("27B gpu_layers must be 'auto' or a nonnegative integer")
+        raise ValueError("12B gpu_layers must be 'auto' or a nonnegative integer")
     return n
 
 
 def _settings(cfg):
     rw = cfg.get("rewriter", {})
     host = "127.0.0.1"
-    port = int(os.environ.get("BANANA_27B_PORT", rw.get("port", 8217)))
+    port = int(os.environ.get("BANANA_12B_PORT", rw.get("port", 8217)))
     if not 1025 <= port <= 65535:
         raise ValueError("27B localhost port invalid")
     return {
         "host": host, "port": port,
-        "exe": Path(os.environ.get("BANANA_27B_SERVER") or rw.get("server") or DEFAULT_SERVER),
-        "model": Path(os.environ.get("BANANA_27B_MODEL") or rw.get("model") or DEFAULT_MODEL),
-        "mmproj": Path(os.environ.get("BANANA_27B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
-        "gpu_layers": _gpu_layers(rw.get("gpu_layers", 999)),
-        "context": int(rw.get("context", 32768)),
+        "exe": Path(os.environ.get("BANANA_12B_SERVER") or rw.get("server") or DEFAULT_SERVER),
+        "model": Path(os.environ.get("BANANA_12B_MODEL") or rw.get("model") or DEFAULT_MODEL),
+        "mmproj": Path(os.environ.get("BANANA_12B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
+        "gpu_layers": _gpu_layers(rw.get("gpu_layers", 99)),
+        "context": int(rw.get("context", 16384)),
         "max_tokens": int(rw.get("max_length", 4096)),
         "temperature": float(rw.get("temperature", 0.4)),
         "top_p": float(rw.get("top_p", 0.8)),
@@ -70,14 +72,15 @@ def _health(s, timeout=2):
 
 
 def _launch_args(s):
-    # Force all layers through the CUDA backend, not unused CPU layers.
-    # On Windows GPU oversubscription requires NVIDIA Sysmem Fallback Policy.
-    # This may be slower or fail under VRAM pressure; 32K context is retained.
+    # Gemma 3 Q5 + vision should fit RTX 5070 12GB with quantized 16K KV.
+    # Keep llama.cpp fitting enabled to avoid Windows WDDM shared-RAM thrash.
+    # Log real offload after model load; 99 is a full-offload target, not a guarantee.
     return [str(s["exe"]), "-m", str(s["model"]), "--mmproj", str(s["mmproj"]),
             "--host", s["host"], "--port", str(s["port"]),
             "-c", str(s["context"]), "-ngl", str(s["gpu_layers"]),
-            "-fit", ("off" if s["gpu_layers"] == 999 else "on"),
-            "-fa", "auto", "-np", "1", "-t", "8", "--mmproj-offload"]
+            "-fit", "on", "-fitt", "512", "-fa", "auto",
+            "-ctk", "q8_0", "-ctv", "q8_0", "-np", "1", "-t", "8",
+            "--mmproj-offload"]
 
 
 def ensure_running(cfg):
@@ -88,21 +91,20 @@ def ensure_running(cfg):
         if _PROC is not None and _PROC.poll() is None:
             if _health(s):
                 return s
-            raise RuntimeError("27B service process exists but is not responding")
+            raise RuntimeError("12B service process exists but is not responding")
         if _health(s):
-            raise RuntimeError("27B port is already occupied by another process; refusing to take it over")
+            raise RuntimeError("12B port is already occupied by another process; refusing to take it over")
         for label in ("exe", "model", "mmproj"):
             if not s[label].is_file():
-                raise FileNotFoundError("27B missing %s: %s; run one-click installer" % (label, s[label]))
+                raise FileNotFoundError("12B missing %s: %s; run one-click installer" % (label, s[label]))
         args = _launch_args(s)
-        log = _ROOT / "Logs" / "llama27b.log"
+        log = _ROOT / "Logs" / "gemma12b.log"
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("ab") as output:
-            banner = ("\\n[BANANAMV 27B] launch: "
-                      "context=%s, gpu_layers=%s, fit=%s, mmproj_offload=on, "
-                      "flash_attn=auto, parallel=1, cpu_threads=8\\n"
-                      % (s["context"], s["gpu_layers"],
-                         "off" if s["gpu_layers"] == 999 else "on"))
+            banner = ("\n[BANANAMV Gemma 3 12B Q5] launch: "
+                      "context=%s, gpu_layers=%s, fit=on, fitt=512MiB, "
+                      "kv=q8_0, mmproj_offload=on, parallel=1\n"
+                      % (s["context"], s["gpu_layers"]))
             output.write(banner.encode("utf-8"))
             output.flush()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -113,15 +115,15 @@ def ensure_running(cfg):
     deadline = time.monotonic() + 600
     while time.monotonic() < deadline:
         if _CANCELLED.is_set():
-            raise InterruptedError("27B director cancelled")
+            raise InterruptedError("12B director cancelled")
         with _LOCK:
             if _PROC is None or _PROC.poll() is not None:
-                raise RuntimeError("27B llama-server exited during load; check Logs/llama27b.log")
+                raise RuntimeError("12B llama-server exited during load; check Logs/gemma12b.log")
         if _health(s):
             return s
         time.sleep(2)
     stop()
-    raise TimeoutError("27B did not become ready within 10 minutes; check llama27b.log")
+    raise TimeoutError("12B did not become ready within 10 minutes; check gemma12b.log")
 
 
 def _messages(system, parts):
@@ -137,8 +139,12 @@ def _messages(system, parts):
             items.append({"type": "image_url", "image_url": {"url": uri}})
         else:
             raise ValueError("Unknown director input part: " + str(kind))
-    return [{"role": "system", "content": str(system)},
-            {"role": "user", "content": items}]
+    # Gemma 3 instruction template expects system guidance inside the user turn.
+    # Preserve the exact picture order after the director's fixed instructions.
+    instructions = {"type": "text", "text":
+                    "[DIRECTOR SYSTEM INSTRUCTIONS]\n" + str(system) +
+                    "\n[CURRENT CLIP COMMISSION]\n"}
+    return [{"role": "user", "content": [instructions] + items}]
 
 
 def _clean_output(value):
@@ -153,13 +159,12 @@ def generate(cfg, system, parts, job_id):
     with _REQUEST_LOCK:
         s = ensure_running(cfg)
         if _CANCELLED.is_set():
-            raise InterruptedError("27B director cancelled")
+            raise InterruptedError("12B director cancelled")
         payload = {
             "model": s["model"].name,
             "messages": _messages(system, parts),
             "temperature": s["temperature"], "top_p": s["top_p"],
             "max_tokens": s["max_tokens"], "stream": False,
-            "chat_template_kwargs": {"enable_thinking": False},
         }
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         req = request.Request(_url(s, "/v1/chat/completions"), data=data,
@@ -170,18 +175,18 @@ def generate(cfg, system, parts, job_id):
                 answer = json.load(response)
         except error.HTTPError as exc:
             detail = exc.read(1200).decode("utf-8", "replace")
-            raise RuntimeError("27B request failed: HTTP %s: %s" % (exc.code, detail)) from exc
+            raise RuntimeError("12B request failed: HTTP %s: %s" % (exc.code, detail)) from exc
         if _CANCELLED.is_set():
-            raise InterruptedError("27B director cancelled")
+            raise InterruptedError("12B director cancelled")
         try:
             raw = answer["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise ValueError("27B returned invalid chat completion") from exc
+            raise ValueError("12B returned invalid chat completion") from exc
         if isinstance(raw, list):
             raw = "".join(str(part.get("text", "")) for part in raw if isinstance(part, dict))
         output = _clean_output(raw)
         if not output:
-            raise ValueError("27B director returned empty text")
+            raise ValueError("12B director returned empty text")
         return output
 
 
@@ -204,4 +209,4 @@ def stop(cancel=False):
             proc.wait(timeout=10)
     # GPU memory belongs to the OS process; wait for confirmed process exit.
     if proc.poll() is None:
-        raise RuntimeError("27B process still alive; refuse to queue H3")
+        raise RuntimeError("12B process still alive; refuse to queue H3")
