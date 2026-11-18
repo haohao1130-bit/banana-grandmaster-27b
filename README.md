@@ -10,6 +10,7 @@
 - 前端：`http://127.0.0.1:8193`；專用 H3 ComfyUI：`127.0.0.1:8218`；27B llama.cpp（按需起停）：`127.0.0.1:8217`
 - RTX 5070 12GB / 5800X3D / 64GB RAM：27B 使用 llama.cpp 的 `-ngl auto -fit on -fitt 1024 -fa auto -np 1 -t 8`，自動依可用顯存卸載 GPU 層數，不再固定只卸載 12 層；32K 上下文不降低，仍無法把約 17.2GB 的 GGUF 整個裝入 12GB 顯存。已安裝舊值 `gpu_layers=12` 在下次啟動時遷移成 `auto`，其他自訂數值保留。可查看 `Logs/llama27b.log` 驗證真實 CUDA offload 與效能。H3 執行前仍卸載 27B。實際速度須本機測試。
 - 前端預設：**720P 1280×720、10 秒／段、末幀接續**；可自行改 480P 或 5 秒作診斷。
+- **27B 雙人 SRT 角色隔離（修正）**：依使用者明確的 S1/S2 ↔ @圖片角色綁定，支援分行角色名稱及額外舞台／場景參考圖。已綁定的雙人 SRT 統一走 Python 擁有聲部時窗的自由分鏡流程，不悄悄改走一般 H3 改寫；缺少明確雙人身份時才報錯，不以圖片順序猜歌手。角色參考圖不等於出場權限，依當段事件及使用者明確標記的首次入鏡時間控制角色能否出現。指定尚未登場者不能被導演安排成背景、反打或反射。每段 H3 仍保留原曲與六欄格式，不提供前後事件給下游。測試：`python -m unittest tests.test_clip_cast_27b`（實機 GPU/出片尚待驗證）。
 - 一鍵安裝：`tools/install_27b.ps1`，可用配套 `Install_BANANAMV_27B.cmd` 啟動；自動建立資料夾、Git checkout、CUDA13 Python、獨立 Comfy/T8、llama.cpp CUDA13、音樂分析、8 個 HF 模型，僅重抓缺少或不完整的檔案。
 - 桌面啟動：自動建立「BANANAMV 27B」，或使用 `F:\AI\BANANAMV_27B_STUDIO\Launch_BANANAMV_27B.cmd`。
 - **27B 獨立網頁重啟**：桌面啟動器啟動 `tools/supervise_27b.py`，由獨立重啟管理程序提供心跳並管理它親自啟動的 8193 Python 後端。手機網頁按「重啟丹爐」時，先確認沒有 27B 生成任務與 H3 佇列，先卸載所屬 27B llama，再只重啟所屬 Python 後端；**H3 ComfyUI（8218）保持執行，不碰其他 MV／FILM 程序**。重啟後由首頁重新連線，專案及模型檔案保持原樣。
