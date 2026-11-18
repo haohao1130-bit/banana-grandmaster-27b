@@ -663,7 +663,7 @@ syncMobileFurnace();
    const health = await fetch('/api/mv/face-refine-capability', {cache:'no-store'});
    if (!health.ok || !(await health.json()).local5070) return;
    settings.hidden = false;
-   button.hidden = false;
+   button.hidden = true; // 27B is an independent studio; do not switch to FILM.
    const response = await fetch('/api/5070/switch', {cache:'no-store'});
    if (!response.ok) throw Error('無法讀取切換狀態');
    const state = await response.json();
