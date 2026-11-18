@@ -26,9 +26,9 @@ _CANCELLED = threading.Event()
 
 
 def _gpu_layers(value):
-    """Accept llama.cpp native auto offload or an explicit numeric layer cap."""
-    if value is None or str(value).strip().lower() == "auto":
-        return "auto"
+    """Request full CUDA layers by default; numeric caps remain supported."""
+    if value is None or str(value).strip().lower() in ("auto", "all"):
+        return 999
     try:
         n = int(value)
     except (TypeError, ValueError) as exc:
@@ -49,7 +49,7 @@ def _settings(cfg):
         "exe": Path(os.environ.get("BANANA_27B_SERVER") or rw.get("server") or DEFAULT_SERVER),
         "model": Path(os.environ.get("BANANA_27B_MODEL") or rw.get("model") or DEFAULT_MODEL),
         "mmproj": Path(os.environ.get("BANANA_27B_MMPROJ") or rw.get("mmproj") or DEFAULT_MMPROJ),
-        "gpu_layers": _gpu_layers(rw.get("gpu_layers", "auto")),
+        "gpu_layers": _gpu_layers(rw.get("gpu_layers", 999)),
         "context": int(rw.get("context", 32768)),
         "max_tokens": int(rw.get("max_length", 4096)),
         "temperature": float(rw.get("temperature", 0.4)),
@@ -70,14 +70,14 @@ def _health(s, timeout=2):
 
 
 def _launch_args(s):
-    # Native auto offload chooses layers according to available device memory.
-    # Retain 32K context; llama.cpp fitting may lower actual GPU layers if needed.
-    # the current multimodal commission can exceed 9K input tokens.
+    # Force all layers through the CUDA backend, not unused CPU layers.
+    # On Windows GPU oversubscription requires NVIDIA Sysmem Fallback Policy.
+    # This may be slower or fail under VRAM pressure; 32K context is retained.
     return [str(s["exe"]), "-m", str(s["model"]), "--mmproj", str(s["mmproj"]),
             "--host", s["host"], "--port", str(s["port"]),
             "-c", str(s["context"]), "-ngl", str(s["gpu_layers"]),
-            "-fit", "on", "-fitt", "1024", "-fa", "auto", "-np", "1",
-            "-t", "8", "--no-mmproj-offload"]
+            "-fit", ("off" if s["gpu_layers"] == 999 else "on"),
+            "-fa", "auto", "-np", "1", "-t", "8", "--mmproj-offload"]
 
 
 def ensure_running(cfg):
@@ -99,9 +99,10 @@ def ensure_running(cfg):
         log.parent.mkdir(parents=True, exist_ok=True)
         with log.open("ab") as output:
             banner = ("\\n[BANANAMV 27B] launch: "
-                      "context=%s, gpu_layers=%s, fit=on, fit_target=1024MiB, "
+                      "context=%s, gpu_layers=%s, fit=%s, mmproj_offload=on, "
                       "flash_attn=auto, parallel=1, cpu_threads=8\\n"
-                      % (s["context"], s["gpu_layers"]))
+                      % (s["context"], s["gpu_layers"],
+                         "off" if s["gpu_layers"] == 999 else "on"))
             output.write(banner.encode("utf-8"))
             output.flush()
             flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
