@@ -13,6 +13,20 @@ $data = Join-Path $Root 'Data'
 $logs = Join-Path $Root 'Logs'
 $out = Join-Path $Root 'Output'
 $yaml = Join-Path $runtime 'extra_model_paths.yaml'
+# The phone/Tailscale frontend is fixed to 8193, matching existing 5070 URLs.
+# Do not terminate the original MV or FILM if they currently own this listener.
+$portCheck = New-Object System.Net.Sockets.TcpClient
+try {
+    $async = $portCheck.BeginConnect('127.0.0.1',8193,$null,$null)
+    if ($async.AsyncWaitHandle.WaitOne(800,$false)) {
+        try {
+            $portCheck.EndConnect($async)
+            throw 'Port 8193 is already in use. Close the original BANANAMV or BANANAFILM backend before launching 27B. Existing services were not stopped.'
+        } catch [System.Net.Sockets.SocketException] { }
+    }
+} finally {
+    $portCheck.Close()
+}
 if (!(Test-Path -LiteralPath $python)) { throw "27B Python missing: $python. Run Install_BANANAMV_27B.cmd." }
 if (!(Test-Path -LiteralPath (Join-Path $comfy 'main.py'))) { throw 'Independent ComfyUI missing; run installer.' }
 # Safe one-click startup update. Never reset local edits or switch branches.
@@ -28,7 +42,8 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 }
 foreach ($dir in @($data,$logs,$out)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
 $env:BANANA_DATA = $data
-$env:BANANA_PORT = '8195'
+$env:BANANA_PORT = '8193'
+$env:BANANA_27B_STANDALONE = '1'
 $env:BANANA_FINISHED_VIDEOS = $out
 $env:BANANA_27B_ROOT = $Root
 $env:BANANA_27B_SERVER = (Join-Path $runtime 'llama.cpp\llama-server.exe')
@@ -91,8 +106,8 @@ foreach ($node in @('MiniMaxH3AudioConditioningT8','CLIPLoader','UNETLoader','Mo
 }
 Write-Host 'Independent H3 ComfyUI: http://127.0.0.1:8218'
 Write-Host '27B Director: owned process on port 8217, launched on demand.'
-Write-Host 'BANANAMV 27B: http://127.0.0.1:8195'
-if (!$NoBrowser) { Start-Process 'http://127.0.0.1:8195' }
+Write-Host 'BANANAMV 27B: http://127.0.0.1:8193'
+if (!$NoBrowser) { Start-Process 'http://127.0.0.1:8193' }
 Push-Location $app
 try { & $python -u -m banana_mv.server }
 finally { Pop-Location }
