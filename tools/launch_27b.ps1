@@ -63,8 +63,9 @@ foreach ($dir in @($data,$logs,$out)) { New-Item -ItemType Directory -Force -Pat
 $env:BANANA_DATA = $data
 $env:BANANA_PORT = '8193'
 $env:BANANA_27B_STANDALONE = '1'
-# Only the independent Python supervisor we launch may authorize web restart.
-$env:BANANA_SUPERVISED_RESTART = '1'
+# Stability isolation: disable web-triggered restart, keeping original direct backend.
+# The supervisor utility remains in the repo but is NOT launched.
+$env:BANANA_SUPERVISED_RESTART = '0'
 $env:BANANA_FINISHED_VIDEOS = $out
 $env:BANANA_27B_ROOT = $Root
 $env:BANANA_27B_SERVER = (Join-Path $runtime 'llama.cpp\llama-server.exe')
@@ -140,9 +141,9 @@ Write-Host 'Independent H3 ComfyUI: http://127.0.0.1:8218'
 Write-Host '27B Director: owned process on port 8217, launched on demand.'
 Write-Host 'BANANAMV 27B: http://127.0.0.1:8193'
 if (!$NoBrowser) { Start-Process 'http://127.0.0.1:8193' }
-# Keep a real supervisor alive to acknowledge and execute safe restart requests.
-# ComfyUI remains external to its ownership: restarting HTTP cannot kill H3.
-Write-Host '27B restart supervisor active (HTTP backend only; ComfyUI untouched).'
+# Restore known-working 27B startup (same as first successful director shot).
+# Do not supervise, terminate, or restart this server from a second process.
+Write-Host '27B startup: direct backend (restart supervisor disabled for stability test).'
 Push-Location $app
-try { & $python -u (Join-Path $app 'tools\supervise_27b.py') }
+try { & $python -u -m banana_mv.server }
 finally { Pop-Location }
