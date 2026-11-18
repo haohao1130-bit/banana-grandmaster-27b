@@ -27,7 +27,7 @@ DEFAULTS = {
     'free_after_rewrite': True,
     'rewriter': {'model': str(llama27b.DEFAULT_MODEL), 'mmproj': str(llama27b.DEFAULT_MMPROJ),
                  'server': str(llama27b.DEFAULT_SERVER), 'port': 8217,
-                 'gpu_layers': 'auto', 'context': 32768, 'max_length': 4096,
+                 'gpu_layers': 35, 'context': 32768, 'max_length': 4096,
                  'temperature': 0.4, 'top_p': 0.8},
 }
 
@@ -47,10 +47,10 @@ def load_config():
     # Lift ONLY that known legacy default to 32K; keep custom user values.
     if int(cfg['rewriter'].get('context', 32768)) == 8192:
         cfg['rewriter']['context'] = 32768
-    # Original 27B one-click installer hardcoded 12 layers and caused heavy CPU inference.
-    # Migrate only this known legacy default; preserve custom numeric layer caps.
-    if str(cfg['rewriter'].get('gpu_layers', 'auto')) == '12':
-        cfg['rewriter']['gpu_layers'] = 'auto'
+    # Earlier installer used 12 layers, later changed it to unrestricted auto.
+    # Migrate both defaults to the user-selected 35-layer cap; preserve custom numeric caps.
+    if str(cfg['rewriter'].get('gpu_layers', 35)).lower() in ('12', 'auto'):
+        cfg['rewriter']['gpu_layers'] = 35
     return cfg
 
 
