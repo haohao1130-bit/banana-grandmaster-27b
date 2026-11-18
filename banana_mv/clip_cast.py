@@ -100,7 +100,7 @@ def clip_visibility(event, brief, segment, pictures, cues):
         if p and int(p[1]) in active_refs:
             visible_roles.add(role)
         # Local event may explicitly name a singer role without a Picture tag.
-        if re.search(r"\\b" + role + r"\\b", event, re.I):
+        if re.search(r"\b" + role + r"\b", event, re.I):
             visible_roles.add(role)
     access = {}
     for role in ("S1", "S2"):
