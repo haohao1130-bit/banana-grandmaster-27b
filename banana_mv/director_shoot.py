@@ -32,11 +32,6 @@ DIRECTOR_SYSTEM = (
     'Within a shot, allow several SRT vocal changes without cutting camera. '
     'Preserve the exact source audio; do not add dialogue, lyrics or voices. '
     'Non-singers remain silent during their unassigned SRT windows. '
-    'Keep the final H3 shooting prompt concise: aim for roughly 1000–1500 '
-    'tokens for a normal 10-second clip. This is a SOFT creative budget, '
-    'not a truncation or rejection rule: required cast, all singer windows, '
-    'physical action and the six-section H3 contract always take priority. '
-    'Avoid repetitive lighting, generic cinematic filler and redundant shots. '
     'Provide SIX native H3 sections: subject_definitions, summary, '
     'retention_analysis, detailed_description, overall_soundscape, '
     'non_diegetic_music. In detailed_description use sequential [Shot N] '
@@ -221,10 +216,6 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
         'The actor in an SRT gap can listen, breathe or move but not vocalize.',
         'No previous/next events, invented dialogue, new person or costume reset.',
         'Preserve current position, direction, prop handling, lighting and stage.',
-        'Write a compact, filmable 10-second shot plan: target roughly '
-        '1000–1500 tokens in the final H3 six-section prompt, but preserve '
-        'every required current event and SRT vocal window. This is a soft '
-        'length target, never a reason to drop events or force extra cuts.',
         'Write native SIX H3 Ref2VA sections. Python supplies final '
         'identity/wardrobe/audio sections, so spend creativity on '
         'detailed_description: camera position, action, expression, consequence.',
