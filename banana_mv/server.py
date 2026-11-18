@@ -82,14 +82,20 @@ def restart_capability():
             enabled = time.time() - RESTART_HEARTBEAT.stat().st_mtime < 12
         except OSError:
             enabled = False
+    standalone = os.environ.get('BANANA_27B_STANDALONE') == '1'
+    missing = ('27B 獨立重啟管家未啟動，請使用 27B 桌面捷徑重新啟動。'
+               if standalone else '5070 桌面管家尚未啟動，請使用 V4 桌面捷徑。')
     return {'available': enabled, 'busy': GPU_LOCK.locked(),
-            'reason': ('5070 桌面管家尚未啟動，請使用 V4 桌面捷徑。' if not enabled
+            'reason': (missing if not enabled
                        else '目前有任務正在執行，請等完成再重啟。' if GPU_LOCK.locked() else '')}
 
 
 def request_desktop_restart(handler, payload):
     """Request, never execute, a privileged restart; Windows supervisor owns processes."""
-    if handler.headers.get('X-Banana-Control') != '5070-restart':
+    standalone = os.environ.get('BANANA_27B_STANDALONE') == '1'
+    expected_header = '27b-restart' if standalone else '5070-restart'
+    expected_confirm = 'restart-27b' if standalone else 'restart-5070'
+    if handler.headers.get('X-Banana-Control') != expected_header:
         raise ValueError('缺少本機控制確認標頭。')
     if handler.headers.get('Content-Type','').split(';',1)[0].strip().lower() != 'application/json':
         raise ValueError('請使用 JSON 傳送重新啟動要求。')
@@ -104,7 +110,7 @@ def request_desktop_restart(handler, payload):
     # Tailscale Serve may forward the original Host or supply X-Forwarded-Host.
     if origin_host not in (request_host, forwarded_host):
         raise ValueError('來源網址不符合目前的 5070 前端。')
-    if payload.get('confirm') != 'restart-5070':
+    if payload.get('confirm') != expected_confirm:
         raise ValueError('尚未確認重新啟動。')
     with RESTART_LOCK:
         state = restart_capability()
@@ -118,6 +124,10 @@ def request_desktop_restart(handler, payload):
             raise ValueError('ComfyUI 還有正在執行或等待的工作，請先完成再重新啟動。')
         if RESTART_REQUEST.exists():
             raise ValueError('重新啟動要求已送出，請勿重複點擊。')
+        if standalone:
+            # Release the idle 27B process we own before the HTTP worker exits.
+            # The supervisor only recycles this HTTP process; H3 ComfyUI stays alive.
+            backend.cancel_27b()
         RESTART_REQUEST.parent.mkdir(parents=True, exist_ok=True)
         tmp = RESTART_REQUEST.with_suffix('.tmp')
         tmp.write_text(json.dumps({'version':1,'issued_at':time.time(),
