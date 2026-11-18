@@ -52,8 +52,6 @@ CLOCK = re.compile(
     r'^\s*(?:At\s+)?(?P<minutes>\d{1,2}):(?P<seconds>\d{2}'
     r'(?:\.\d{1,3})?)\s*[,;:]\s*', re.I
 )
-MAX_SHOTS = 12
-
 
 def parse_director_shots(raw, seconds, cues, scene_schedule=()):
     """Parse 9B-authored CAMERA cuts; do not divide shots at SRT boundaries."""
@@ -73,8 +71,6 @@ def parse_director_shots(raw, seconds, cues, scene_schedule=()):
             raise ValueError('9B must supply a detailed_description and [Shot 1].')
         parts = [(1, 0.0, text.strip())]
     else:
-        if len(labels) > MAX_SHOTS:
-            raise ValueError('9B camera cuts exceed the practical per-clip limit.')
         parts = []
         for i, mark in enumerate(labels, 1):
             number = int(mark[1])
@@ -222,7 +218,7 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
         'Use [Shot 1] for the first shot (starts at 0.000s). '
         'For EACH later camera CUT label [Shot N] At mm:ss.mmm, ...',
         'One-shot is valid: output only [Shot 1], no forced [Shot 2]. '
-        'Choose freely up to 12 meaningful shots for a clip.',
+        'Choose the number of meaningful shots that the current clip actually needs; there is no fixed shot count or artificial maximum.',
         'Camera energy: ' + str(req.get('intensity', 'high')) + '.',
         '',
         '=== NATIVE SIX-SECTION DELIVERY EXAMPLE (ONE-SHOT SHAPE) ===',
@@ -251,7 +247,8 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
                             continuity=len(refs) > 2, scene_schedule=schedule)
     calls = 0
     retry_limit = rewrite_retry_count(req)
-    max_calls = (retry_limit+1) * (3 + 2 * MAX_SHOTS)
+    # Progress estimate only; actual number of camera cuts is never capped.
+    max_calls = (retry_limit + 1) * 3
     def call(parts, temperature, system=DIRECTOR_SYSTEM):
         nonlocal calls
         calls += 1
@@ -275,6 +272,8 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
                 break
             except ValueError as error:
                 why = str(error)
+        if blocks is not None:
+            max_calls = max(max_calls, calls + (retry_limit + 1) * 2 * len(slots))
         if blocks is None:
             if restart < retry_limit:
                 continue
