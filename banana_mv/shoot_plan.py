@@ -617,7 +617,9 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
                 '27B 雙人 SRT 缺少明確 S1/S2 對應圖片；請在故事開頭標註'
                 ' @圖片1＝角色名、S1＝角色名，以及 @圖片2／S2。'
                 '禁止退回無角色隔離的一般改寫流程。')
-        access=clip_visibility(event,req.get('prompt',''),segment,pictures,vocals)
+        # Inspect the original unshifted picture slots: a continuation tail
+        # shifts H3 Picture indices, never the author's event bindings.
+        access=clip_visibility(event,req.get('prompt',''),segment,source_singers,vocals)
         refs = ([tail] if tail else []) + list(originals)
         segment['director_mode'] = row['mode']
         native = write_director_shoot_prompt(
