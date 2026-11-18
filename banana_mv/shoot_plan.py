@@ -603,20 +603,22 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     # final H3 sections. 9B owns the number and timing of CAMERA cuts. Never
     # convert an SRT handoff into a compulsory new shot.
     # All other legacy and unscripted routes stay unchanged.
-    tagged_dual_srt = (req.get('director_schema') == 6
-                       and len(originals) >= 2
-                       and req.get('srt_cues')
-                       and any(SUBJECT_VOCAL_PREFIX.match(c.get('text',''))
-                               for c in req['srt_cues']))
-    if tagged_dual_srt:
-        # The dedicated Python-owned SRT/camera route is mandatory in the 27B
-        # experiment. Never fall silently to generic native rewriting because
-        # of an extra stage photo or a two-line user cast declaration.
-        if not {'S1', 'S2'} <= set(pictures):
-            raise SceneStateError(
-                '27B 雙人 SRT 缺少明確 S1/S2 對應圖片；請在故事開頭標註'
-                ' @圖片1＝角色名、S1＝角色名，以及 @圖片2／S2。'
-                '禁止退回無角色隔離的一般改寫流程。')
+    # SRT labels are explicit user-authority; a stage image is not a third
+    # singer. Preserve legacy solo jobs without inventing a second vocalist.
+    tagged = [SUBJECT_VOCAL_PREFIX.match(c.get('text',''))
+              for c in (req.get('srt_cues') or [])]
+    tagged_roles = {role.strip().upper() for m in tagged if m
+                    for role in m.group(1).split('+')}
+    route_candidate = (req.get('director_schema') == 6 and len(originals) >= 2
+                       and bool(tagged_roles))
+    if route_candidate and {'S1', 'S2'} <= tagged_roles and not {'S1', 'S2'} <= set(pictures):
+        raise SceneStateError(
+            '27B 雙人 SRT 缺少明確 S1/S2 對應圖片；請在故事開頭標註'
+            ' @圖片1＝角色名、S1＝角色名，以及 @圖片2／S2。'
+            '禁止退回無角色隔離的一般改寫流程。')
+    if route_candidate and {'S1', 'S2'} <= set(pictures):
+        # Python-owned SRT/camera route is mandatory for resolved two-singer
+        # clips, including those with additional location reference images.
         # Inspect the original unshifted picture slots: a continuation tail
         # shifts H3 Picture indices, never the author's event bindings.
         access=clip_visibility(event,req.get('prompt',''),segment,source_singers,vocals)
