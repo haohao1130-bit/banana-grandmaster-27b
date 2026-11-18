@@ -8,22 +8,22 @@ from banana_mv.commission_guard import role_pictures
 from banana_mv.core import map_image_mentions
 
 
-PICTURE = re.compile(r"^\\s*<Picture\\s+(\\d+)>\\s*(?:[=:：＝|｜-]\\s*)?(.*)$", re.I)
-ROLE = re.compile(r"^\\s*\\[?\\s*(S[12])\\s*\\]?\\s*(?:[=:：＝|｜-]\\s*)?(.*)$", re.I)
-TIME = re.compile(r"(?<!\\d)(\\d{1,2}):(\\d\\d)\\.(\\d{1,3})(?!\\d)")
-FIRST = re.compile(r"(?:首次|第一次).{0,22}(?:入鏡|登場|出現|露面)|(?:first|initial)\\s+(?:appear|entrance|on.screen)|(?:debut)", re.I)
-PRESENT_REF = re.compile(r"<Picture\\s+(\\d+)>", re.I)
-ROLE_REF = re.compile(r"<Subject\\s+([12])>|\\b(S[12])\\b", re.I)
+PICTURE = re.compile(r"^\s*<Picture\s+(\d+)>\s*(?:[=:：＝|｜-]\s*)?(.*)$", re.I)
+ROLE = re.compile(r"^\s*\[?\s*(S[12])\s*\]?\s*(?:[=:：＝|｜-]\s*)?(.*)$", re.I)
+TIME = re.compile(r"(?<!\d)(\d{1,2}):(\d\d)\.(\d{1,3})(?!\d)")
+FIRST = re.compile(r"(?:首次|第一次).{0,22}(?:入鏡|登場|出現|露面)|(?:first|initial)\s+(?:appear|entrance|on.screen)|(?:debut)", re.I)
+PRESENT_REF = re.compile(r"<Picture\s+(\d+)>", re.I)
+ROLE_REF = re.compile(r"<Subject\s+([12])>|\b(S[12])\b", re.I)
 
 
 def _name(text):
     """Extract only a clearly named identity, not costume or a performance rule."""
-    value = re.split(r"[,，;；(（|｜\\n]", text, 1)[0].strip(" \\t=：:－-。")
+    value = re.split(r"[,，;；(（|｜\n]", text, 1)[0].strip(" \t=：:－-。")
     if not value or value.startswith("<") or len(value) > 48:
         return ""
-    if re.search(r"\\b(?:male|female|adult|sing|lyrics|lead)\\b", value, re.I):
+    if re.search(r"\b(?:male|female|adult|sing|lyrics|lead)\b", value, re.I):
         return ""
-    return re.sub(r"\\s+", "", value).casefold()
+    return re.sub(r"\s+", "", value).casefold()
 
 
 def explicit_bindings(brief, count):
@@ -67,14 +67,14 @@ def first_appearances(brief):
         # story paragraph must not borrow a timestamp many lines earlier.
         neighborhood = " ".join(lines[i:i+4])
         for role in ("S1", "S2"):
-            if not re.search(r"\\b" + role + r"\\b", neighborhood, re.I):
+            if not re.search(r"\b" + role + r"\b", neighborhood, re.I):
                 continue
             if not FIRST.search(neighborhood):
                 continue
             # Require the role and the first-appearance word in one sentence
             # (not a separate sentence about the other singer).
-            for part in re.split(r"[。！？.!?\\n]", neighborhood):
-                if re.search(r"\\b" + role + r"\\b", part, re.I) and FIRST.search(part):
+            for part in re.split(r"[。！？.!?\n]", neighborhood):
+                if re.search(r"\b" + role + r"\b", part, re.I) and FIRST.search(part):
                     minutes, seconds, millis = stamp.groups()
                     time_sec = int(minutes)*60 + int(seconds) + int(millis.ljust(3,"0"))/1000
                     result[role] = min(time_sec, result.get(role, float("inf")))
@@ -129,7 +129,7 @@ def premature_cast_errors(blocks, access):
     for role, number in (("S1", 1), ("S2", 2)):
         if access[role]["status"] != "absent":
             continue
-        mention = re.compile(r"<Subject\\s+"+str(number)+r">", re.I)
+        mention = re.compile(r"<Subject\s+"+str(number)+r">", re.I)
         for shot, body in blocks.items():
             if mention.search(body):
                 errors.setdefault(shot, []).append(
