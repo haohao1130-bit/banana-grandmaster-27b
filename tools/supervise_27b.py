@@ -21,11 +21,13 @@ BRANCH = "experiment/rtx5070-latest-27b-lab"
 HEALTH = "http://127.0.0.1:8193/api/health"
 
 
-def current_instance():
+def current_instance(expected_pid):
     try:
         with request.urlopen(HEALTH, timeout=2) as response:
             payload = json.load(response)
-        return payload.get("instance") if payload.get("standalone") else None
+        if payload.get("standalone") and payload.get("pid") == expected_pid:
+            return payload.get("instance")
+        return None
     except (OSError, ValueError):
         return None
 
@@ -74,7 +76,7 @@ def start_http():
     while time.monotonic() < deadline:
         if proc.poll() is not None:
             raise RuntimeError("27B HTTP backend exited at startup (code %s)" % proc.returncode)
-        instance = current_instance()
+        instance = current_instance(proc.pid)
         if instance:
             print("27B supervisor: backend ready, instance", instance, flush=True)
             return proc, instance
@@ -114,7 +116,7 @@ def run():
                     payload = json.loads(processing.read_text(encoding="utf-8"))
                     # The requested instance must match the backend we OWN
                     # and the current live health endpoint.
-                    if valid_request(payload, instance) and current_instance() == instance:
+                    if valid_request(payload, instance) and current_instance(proc.pid) == instance:
                         print("27B supervisor: confirmed idle restart, recycling owned HTTP backend.", flush=True)
                         proc.terminate()
                         try:
