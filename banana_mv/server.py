@@ -520,37 +520,6 @@ def export_finished_video(job,source,*,refined_version=None,upscaled_version=Non
     return target
 
 
-def _validate_queued_start(job, cfg):
-    """Run potentially slow ComfyUI checks AFTER /api/mv/start returns a job ID.
-
-    This prevents Tailnet/mobile reverse proxies from timing out the creation
-    request. Failures are persisted by worker(), so the frontend sees the actual
-    ComfyUI error rather than an empty HTTP response.
-    """
-    if not job.get('preflight_pending'):
-        return
-    job['status'] = 'checking_environment'
-    job['preflight_status'] = 'checking'
-    write_state(job)
-    queue = backend.comfy(cfg, '/queue')
-    if queue.get('queue_running') or queue.get('queue_pending'):
-        raise ValueError('ComfyUI 還有其他工作，請先等它完成。')
-    req = job['request']
-    if not (req.get('plan_review') and req.get('rewrite', True)):
-        images = job['images_comfy']
-        segment = job['segments'][0]
-        graph = build_workflow(
-            images, 'preflight.wav', *job['size'], segment['model_frames'],
-            '', job['seed'], **graph_options(req, segment['seconds']))
-        preflight(cfg, graph)
-        preflight_five_frame(
-            cfg, req, images, job['size'], segment, job['seed'])
-    job['preflight_pending'] = False
-    job['preflight_status'] = 'passed'
-    job['status'] = 'running'
-    write_state(job)
-
-
 def worker(job, cfg, original, song, drive):
     from banana_mv import face_refine
 
@@ -561,7 +530,6 @@ def worker(job, cfg, original, song, drive):
     def rewrite_progress(info):
         job['rewrite_attempt']=info;write_state(job)
     try:
-        _validate_queued_start(job, cfg)
         if job.get('resuming') and job['request'].get('director_schema')==6:
             from banana_mv.python_slots import refresh_stale_timed_plan
             refresh_stale_timed_plan(job,original,work)
@@ -971,15 +939,22 @@ def start(req):
     # Fail invalid image mentions before queueing any rewrite or GPU work.
     fallback_prompt(req['prompt'], False, '', len(images))
     images_comfy = [img['comfy_name'] for img in images]
-    # Queue/model preflight can block for up to a minute on a cold ComfyUI.
-    # Do it in the worker after persisting the job: POST must return quickly.
+    # Plan-only reviews need the external GGUF director, not an H3 sampling graph.
+    # Actual H3 graphs are preflighted when the user approves the plan / opens the furnace.
+    if not (req['plan_review'] and req.get('rewrite', True)):
+        graph = build_workflow(images_comfy,'preflight.wav',*size,plan[0]['model_frames'],'',seed,
+                               **graph_options(req,plan[0]['seconds']))
+        preflight(cfg,graph)
+        preflight_five_frame(cfg, req, images_comfy, size, plan[0], seed)
     if not GPU_LOCK.acquire(blocking=False):
         raise ValueError('已有 MV 工作執行中，請等它完成。')
     try:
+        queue = backend.comfy(cfg,'/queue')
+        if queue.get('queue_running') or queue.get('queue_pending'):
+            raise ValueError('ComfyUI 還有其他工作，請先等它完成。')
         job_id=uuid.uuid4().hex[:12]
         (RUNS/job_id).mkdir()
-        job={'id':job_id,'status':'running','preflight_pending':True,
-             'preflight_status':'queued','created':time.time(),'request':req,
+        job={'id':job_id,'status':'running','created':time.time(),'request':req,
              'face_refine_chain': bool(req.get('face_refine') and req['mode'] in ('chain', 'chain5')),
              'duration':seconds,'segments':plan,'size':size,'seed':seed,'timeline_source':'decoded_audio',
              'output_size':output_size, 'title':str(req.get('project_name') or music['name'])[:120],
