@@ -43,7 +43,7 @@ class RequestTests(unittest.TestCase):
         self.req = patch.object(server, "RESTART_REQUEST", self.dest)
         self.req.start()
         self.addCleanup(self.req.stop)
-        self.env = patch.dict(os.environ, {"BANANA_27B_STANDALONE": "1"})
+        self.env = patch.dict(os.environ, {"BANANA_12B_STANDALONE": "1"})
         self.env.start()
         self.addCleanup(self.env.stop)
         self.handler = type("Handler", (), {"headers": {
@@ -52,7 +52,7 @@ class RequestTests(unittest.TestCase):
             "X-Forwarded-Host": "desktop.example.ts.net",
             "Content-Type": "application/json",
             "Sec-Fetch-Site": "same-origin",
-            "X-Banana-Control": "27b-restart",
+            "X-Banana-Control": "12b-restart",
         }})()
 
     def test_accepts_idle_browser_request_and_releases_own_llama(self):
@@ -61,7 +61,7 @@ class RequestTests(unittest.TestCase):
              patch.object(server.backend, "comfy", return_value={}), \
              patch.object(server.backend, "cancel_27b") as stop:
             result = server.request_desktop_restart(
-                self.handler, {"confirm": "restart-27b"})
+                self.handler, {"confirm": "restart-12b"})
         self.assertTrue(result["restarting"])
         self.assertEqual(json.loads(self.dest.read_text())["instance"],
                          server.SERVER_INSTANCE)
@@ -72,12 +72,12 @@ class RequestTests(unittest.TestCase):
                     "available": True, "busy": True, "reason": "busy"}):
             with self.assertRaises(ValueError):
                 server.request_desktop_restart(
-                    self.handler, {"confirm": "restart-27b"})
+                    self.handler, {"confirm": "restart-12b"})
         self.assertFalse(self.dest.exists())
         self.handler.headers["Origin"] = "https://untrusted.example"
         with self.assertRaises(ValueError):
             server.request_desktop_restart(
-                self.handler, {"confirm": "restart-27b"})
+                self.handler, {"confirm": "restart-12b"})
         self.assertFalse(self.dest.exists())
 
     def test_rejects_active_h3_queue(self):
@@ -88,7 +88,7 @@ class RequestTests(unittest.TestCase):
              patch.object(server.backend, "cancel_27b") as stop:
             with self.assertRaises(ValueError):
                 server.request_desktop_restart(
-                    self.handler, {"confirm": "restart-27b"})
+                    self.handler, {"confirm": "restart-12b"})
             stop.assert_not_called()
         self.assertFalse(self.dest.exists())
 
