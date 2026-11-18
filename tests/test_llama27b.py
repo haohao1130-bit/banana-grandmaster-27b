@@ -32,6 +32,8 @@ class Llama27BTests(unittest.TestCase):
         self.assertEqual(settings["host"], "127.0.0.1")
         self.assertEqual(settings["gpu_layers"], 12)
         self.assertEqual(settings["port"], 8217)
+        self.assertEqual(settings["context"], 32768)
+        self.assertEqual(settings["max_tokens"], 4096)
         with self.assertRaisesRegex(ValueError, "port"):
             llama27b._settings({"rewriter": {"port": 80}})
 
