@@ -297,7 +297,7 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
         for attempt in range(3):
             errors = _errors(blocks, wardrobe, schedule, slots)
             if visibility:
-                for number, problems in premature_cast_errors(blocks, visibility).items():
+                for number, problems in premature_cast_errors(blocks, visibility, slots).items():
                     errors.setdefault(number, []).extend(problems)
             if not errors:
                 break
