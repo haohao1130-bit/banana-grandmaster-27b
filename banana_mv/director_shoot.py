@@ -355,7 +355,7 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
                          event, len(refs), fixed, schedule)
         if visibility:
             # Python-authored safety lock travels to H3, never only to the LLM.
-            policy = 'VISIBLE CAST AUTHORITY:\\n' + '\\n'.join(visibility_lines(visibility)) + '\\n'
-            native = native.replace('detailed_description:\\n',
-                                    'detailed_description:\\n' + policy, 1)
+            policy = 'VISIBLE CAST AUTHORITY:\n' + '\n'.join(visibility_lines(visibility)) + '\n'
+            native = native.replace('detailed_description:\n',
+                                    'detailed_description:\n' + policy, 1)
         return native
