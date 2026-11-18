@@ -45,7 +45,7 @@ def _settings(cfg):
     host = "127.0.0.1"
     port = int(os.environ.get("BANANA_12B_PORT", rw.get("port", 8217)))
     if not 1025 <= port <= 65535:
-        raise ValueError("27B localhost port invalid")
+        raise ValueError("12B localhost port invalid")
     return {
         "host": host, "port": port,
         "exe": Path(os.environ.get("BANANA_12B_SERVER") or rw.get("server") or DEFAULT_SERVER),
@@ -72,15 +72,16 @@ def _health(s, timeout=2):
 
 
 def _launch_args(s):
-    # Gemma 3 Q5 + vision should fit RTX 5070 12GB with quantized 16K KV.
-    # Keep llama.cpp fitting enabled to avoid Windows WDDM shared-RAM thrash.
-    # Log real offload after model load; 99 is a full-offload target, not a guarantee.
+    # RTX 5070 12GB: prioritize language layers on CUDA; run Gemma 3 image
+    # projector on CPU, because a multi-image burst can overflow VRAM.
+    # Keep llama.cpp fit enabled for a safe first real-hardware smoke test.
+    # Log real offload after load; 99 is the target, not a verified count.
     return [str(s["exe"]), "-m", str(s["model"]), "--mmproj", str(s["mmproj"]),
             "--host", s["host"], "--port", str(s["port"]),
             "-c", str(s["context"]), "-ngl", str(s["gpu_layers"]),
             "-fit", "on", "-fitt", "512", "-fa", "auto",
             "-ctk", "q8_0", "-ctv", "q8_0", "-np", "1", "-t", "8",
-            "--mmproj-offload"]
+            "--no-mmproj-offload"]
 
 
 def ensure_running(cfg):
@@ -103,7 +104,7 @@ def ensure_running(cfg):
         with log.open("ab") as output:
             banner = ("\n[BANANAMV Gemma 3 12B Q5] launch: "
                       "context=%s, gpu_layers=%s, fit=on, fitt=512MiB, "
-                      "kv=q8_0, mmproj_offload=on, parallel=1\n"
+                      "kv=q8_0, mmproj_offload=off, parallel=1\n"
                       % (s["context"], s["gpu_layers"]))
             output.write(banner.encode("utf-8"))
             output.flush()
