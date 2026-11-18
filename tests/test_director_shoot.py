@@ -150,4 +150,5 @@ class FreeDirectorShotsTests(unittest.TestCase):
         self.assertNotIn('final concert', commission)
         self.assertNotIn('future ending', commission)
         self.assertIn('SRT VOCAL WINDOWS', commission)
+        self.assertIn('1000–1500 tokens', commission)
         self.assertIn('ONE-SHOT', commission)
