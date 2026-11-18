@@ -9,6 +9,7 @@ import re
 import uuid
 
 from banana_mv.commission_guard import scene_wardrobe_schedule
+from banana_mv.clip_cast import visibility_lines, premature_cast_errors
 from banana_mv.lyrics_reference import excerpt, vocal_timeline
 from banana_mv.scene_state import SceneStateError, rewrite_retry_count
 from banana_mv.locked_shoot import (
@@ -32,6 +33,10 @@ DIRECTOR_SYSTEM = (
     'Within a shot, allow several SRT vocal changes without cutting camera. '
     'Preserve the exact source audio; do not add dialogue, lyrics or voices. '
     'Non-singers remain silent during their unassigned SRT windows. '
+    'A referenced identity is not a permit to appear in a clip; obey the '
+    'separate Python VISIBLE CAST AUTHORITY. A reference-only actor must never '
+    'become a watcher, background figure, silhouette, reflection or reaction shot. '
+    'The editor may cut between ONLY authorized visible actors and environments. '
     'Provide SIX native H3 sections: subject_definitions, summary, '
     'retention_analysis, detailed_description, overall_soundscape, '
     'non_diegetic_music. In detailed_description use sequential [Shot N] '
@@ -161,7 +166,7 @@ def _safe_vocals(blocks, slots, fixed):
 
 
 def _free_commission(req, segment, event, pictures, wardrobe, cues,
-                     continuity=False, scene_schedule=()):
+                     continuity=False, scene_schedule=(), visibility=None):
     duration = float(segment['seconds'])
     lines = [
         '=== 1. CURRENT CLIP AUTHORITY — PYTHON FACTS ===',
@@ -181,6 +186,9 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
                 f'<Subject {number}> ({role}): face and hair from '
                 f'{pictures[role]}; preserve the actual CURRENT outfit '
                 'in the opening frame/current event; do not reset it.')
+    if visibility:
+        lines.append('VISIBLE CAST AUTHORITY — reference images do NOT authorize appearances:')
+        lines.extend(visibility_lines(visibility))
     lines.append('SRT VOCAL WINDOWS — they control lip-sync, NEVER camera cuts:')
     lines.extend(singer_rows(0, duration, cues))
     lines.append('Never add singing, Rap or Spoken in a non-assigned interval.')
@@ -239,7 +247,8 @@ def _free_commission(req, segment, event, pictures, wardrobe, cues,
 
 
 def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
-                                wardrobe, refs, images, rewrite, progress=None):
+                                wardrobe, refs, images, rewrite, progress=None,
+                                visibility=None, continuation=None):
     """Actual 5070 two-singer path: independent SRT windows + 9B camera."""
     cues = vocal_timeline(excerpt(req, segment))
     schedule = scene_wardrobe_schedule(event, fixed, pictures, segment['seconds'])
@@ -247,8 +256,11 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
         segment['scene_wardrobe_schedule'] = schedule
     else:
         segment.pop('scene_wardrobe_schedule', None)
+    if continuation is None:
+        continuation = len(refs) > 2  # legacy direct-call tests
     task = _free_commission(req, segment, event, pictures, wardrobe, cues,
-                            continuity=len(refs) > 2, scene_schedule=schedule)
+                            continuity=continuation, scene_schedule=schedule,
+                            visibility=visibility)
     calls = 0
     retry_limit = rewrite_retry_count(req)
     max_calls = (retry_limit+1) * (3 + 2 * MAX_SHOTS)
@@ -284,6 +296,9 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
         failure = None
         for attempt in range(3):
             errors = _errors(blocks, wardrobe, schedule, slots)
+            if visibility:
+                for number, problems in premature_cast_errors(blocks, visibility).items():
+                    errors.setdefault(number, []).extend(problems)
             if not errors:
                 break
             segment['commission_guard_errors'] = [
@@ -329,11 +344,18 @@ def write_director_shoot_prompt(cfg, req, segment, event, fixed, pictures,
         segment['vocal_auto_corrections'] = vocal_fixes
         segment['prompt_profile'] = {
             'source': 'python_srt_free_camera',
+            'cast_visibility': visibility or {},
             'writer_calls': calls,
             'contract_check_calls': 1 + attempt,
             'director_shot_count': len(slots),
             'vocal_auto_correction_count': len(vocal_fixes),
             'fresh_restarts': restart,
         }
-        return _native(blocks, slots, pictures, wardrobe, len(refs) > 2,
-                       event, len(refs), fixed, schedule)
+        native = _native(blocks, slots, pictures, wardrobe, continuation,
+                         event, len(refs), fixed, schedule)
+        if visibility:
+            # Python-authored safety lock travels to H3, never only to the LLM.
+            policy = 'VISIBLE CAST AUTHORITY:\\n' + '\\n'.join(visibility_lines(visibility)) + '\\n'
+            native = native.replace('detailed_description:\\n',
+                                    'detailed_description:\\n' + policy, 1)
+        return native
