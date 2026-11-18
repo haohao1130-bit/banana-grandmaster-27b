@@ -1,197 +1,61 @@
-# 🍌 BANANAMV 27B｜RTX 5070 F 槽獨立實驗片場
+# BANANAMV｜Gemma 3 12B Q5｜RTX 5070 獨立片場
 
-**本分支只跑 Qwen3.5-27B GGUF Q4_K_M 導演，沒有 9B 切換，也不改 BANANAMV / BANANAFILM 成功版。**
+本分支改用 **Gemma 3 12B IT Q5_K_M 多模態導演**，沿用 BANANAMV 27B 實驗版既有的 Python 分段、SRT 聲部分配、角色隔離、MiniMax H3 生成與 ComfyUI 交棒流程。不修改原本 9B、FILM 或舊 27B 分支。
 
-**27B context 32K**：本機 `llama-server.exe` 開啟 32,768 tokens 上下文；舊安裝器寫入的 8,192 將在下次正常啟動時自動遷移，保留自訂的其他上下文值。27B 能讀取完整通告與參考圖；每段 10 秒 H3 原生六欄提示詞由 27B 依當段事件與攝影需求自由決定長度，不設 1,500 tokens 字數目標，必要的動作、SRT 與身分資訊完整保留。32K 需要更多記憶體，5070 12GB 採部分 GPU offload，其餘使用系統 RAM，效能仍須實機驗證。
+## 一鍵安裝（Windows 11、RTX 5070 12GB）
 
-**手機 Tailscale 連線維持 8193**：與原本 5070 前端使用同一個服務埠。原本佔用 8193 的 MV／FILM 後端需先正常結束，不能同時啟動；27B 不會強制停止其他服務。若原本 Tailscale Serve 反向代理已指向本機 8193，可沿用原手機網址；否則須檢查 Serve 對應。
+下載倉庫根目錄的 `Install_BANANAMV_12B.cmd` 並執行。安裝器會自動安裝／檢查 Git、FFmpeg、Python 3.12、CUDA 13 PyTorch、獨立 ComfyUI、H3 T8 節點、官方 llama.cpp CUDA13、Gemma 模型與 H3 權重，支援重跑／模型續傳。需要足夠的 F 槽空間；H3 權重遠大於單一 Gemma 模型檔。
 
-- 安裝目錄：`F:\AI\BANANAMV_27B_STUDIO`
-- 前端：`http://127.0.0.1:8193`；專用 H3 ComfyUI：`127.0.0.1:8218`；27B llama.cpp（按需起停）：`127.0.0.1:8217`
-- RTX 5070 12GB / 5800X3D / 64GB RAM：**實驗性全層 GPU + Windows 共用顯存回退**。27B 預設使用 `-ngl 999 -fit off -fa auto -np 1 -t 8 --mmproj-offload`，要求所有語言模型層和參考圖視覺投影器都跑 CUDA；不再讓 auto-fit 將超出 12GB VRAM 的層留在 CPU。保留 32K 上下文與 4K 最大輸出。Windows 端必須在 **NVIDIA 控制面板／NVIDIA App 的程式設定**，針對 `Runtime\\llama.cpp\\llama-server.exe` 將 `CUDA - Sysmem Fallback Policy` 設為 `Driver Default` 或允許 Sysmem Fallback（不可設成 `Prefer No Sysmem Fallback`）；Linux 用的 `GGML_CUDA_ENABLE_UNIFIED_MEMORY=1` 不能替代 Windows 驅動設定。已安裝的 `gpu_layers=12`／`35`／`auto` 下次啟動會遷移成 `999`，其他自訂數值仍保留。**風險：**GPU 共用記憶體經 PCIe 存取較慢；若驅動未允許回退，可能在啟動時 CUDA OOM；若回退可用，仍可能耗用大量 RAM 且比部分 CPU offload 更慢。實際 CUDA 卸載量及是否有 CPU layers，需由 `Logs/llama27b.log` 的 `offloaded XX/XX layers to GPU` 等字樣驗證，不能只看工作管理員 CPU 百分比。可查看 `Logs/llama27b.log` 驗證真實 CUDA offload 與效能。H3 執行前仍卸載 27B。實際速度須本機測試。
-- 前端預設：**720P 1280×720、10 秒／段、末幀接續**；可自行改 480P 或 5 秒作診斷。
-- **27B 雙人 SRT 角色隔離（修正）**：依使用者明確的 S1/S2 ↔ @圖片角色綁定，支援分行角色名稱及額外舞台／場景參考圖。已綁定的雙人 SRT 統一走 Python 擁有聲部時窗的自由分鏡流程，不悄悄改走一般 H3 改寫；缺少明確雙人身份時才報錯，不以圖片順序猜歌手。角色參考圖不等於出場權限，依當段事件及使用者明確標記的首次入鏡時間控制角色能否出現。指定尚未登場者不能被導演安排成背景、反打或反射。每段 H3 仍保留原曲與六欄格式，不提供前後事件給下游。測試：`python -m unittest tests.test_clip_cast_27b`（實機 GPU/出片尚待驗證）。
-- 一鍵安裝：`tools/install_27b.ps1`，可用配套 `Install_BANANAMV_27B.cmd` 啟動；自動建立資料夾、Git checkout、CUDA13 Python、獨立 Comfy/T8、llama.cpp CUDA13、音樂分析、8 個 HF 模型，僅重抓缺少或不完整的檔案。
-- 桌面啟動：自動建立「BANANAMV 27B」，或使用 `F:\AI\BANANAMV_27B_STUDIO\Launch_BANANAMV_27B.cmd`。
-- **27B 獨立網頁重啟**：桌面啟動器啟動 `tools/supervise_27b.py`，由獨立重啟管理程序提供心跳並管理它親自啟動的 8193 Python 後端。手機網頁按「重啟丹爐」時，先確認沒有 27B 生成任務與 H3 佇列，先卸載所屬 27B llama，再只重啟所屬 Python 後端；**H3 ComfyUI（8218）保持執行，不碰其他 MV／FILM 程序**。重啟後由首頁重新連線，專案及模型檔案保持原樣。
-- **舊版第一次升級**：執行新版啟動器以前先安全 `git pull --ff-only`，再啟動更新後的 `tools/launch_27b.ps1`。舊版 PowerShell 已在記憶體內時，即使拉到新版程式也可能仍執行舊啟動流程；後續新版啟動器更新時會自動重新載入自身。
-- 日誌：`F:\AI\BANANAMV_27B_STUDIO\Logs`；作品：`F:\AI\BANANAMV_27B_STUDIO\Output`；專案：`F:\AI\BANANAMV_27B_STUDIO\Data`。
+- **安裝路徑**：`F:\BANANAMV_12B_STUDIO`
+- **原始倉庫**：`haohao1130-bit/banana-grandmaster-27b`
+- **分支**：`experiment/rtx5070-gemma3-12b`
+- **啟動器**：`F:\BANANAMV_12B_STUDIO\Launch_BANANAMV_12B.cmd`
+- **桌面捷徑**：`BANANAMV 12B`
+- **網頁**：`http://127.0.0.1:8193`
+- **Gemma llama.cpp**：`127.0.0.1:8217`，寫提示詞時才啟動
+- **獨立 MiniMax H3 ComfyUI**：`127.0.0.1:8218`
 
-### 實際模型下載清單
+安裝／啟動時，如果 8193 已被其他 Studio 占用，啟動器會拒絕啟動。8218 也會驗證是否為自己的 ComfyUI；不終止舊片場的程序。**請先正常關閉舊 27B 片場，才啟動 12B**。不要刪除舊資料夾。
 
-| 用途 | 下載來源 |
-| --- | --- |
-| 27B 導演 | `unsloth/Qwen3.5-27B-GGUF / Qwen3.5-27B-Q4_K_M.gguf` |
-| 27B 多圖 | `unsloth/Qwen3.5-27B-GGUF / mmproj-BF16.gguf` |
-| H3 影像權重 | `OliviaRossi/Minimax-h3_Singularity-x-10Eros-Max_PRISM / Minimax-h3_Singularity_x_10Eros-Max_PRISM_int8.safetensors` |
-| H3 文字編碼 | `Comfy-Org/MiniMax-H3 / text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` |
-| H3 影片 VAE | `Comfy-Org/MiniMax-H3 / vae/minimax_h3_video_vae_int8_convrot.safetensors` |
-| H3 音訊 VAE | `Comfy-Org/MiniMax-H3 / vae/minimax_h3_audio_vae_fp32.safetensors` |
-| H3 Combat LoRA | `dseditor/minimax-h3-studio-assets / loras/H3_Combat_V2.safetensors` |
-| H3 Motion Repair LoRA | `dseditor/minimax-h3-studio-assets / loras/Motion_Repair.safetensors` |
+## 模型
 
-注意：除了 8 個模型，還會安裝 Python / Torch、ComfyUI、T8 音訊擴充、llama.cpp、CPU 音樂結構分析器及必要工具。初次安裝需要大容量 F 槽空間與穩定網路。安裝器能自動下載，不代表已通過 RTX 5070 完整影片生成驗收。
+採用同一組 Hugging Face 發行者的互相配對檔案：
 
-**驗收順序**：安裝→CUDA13健康檢查→27B 雙圖片導演提示詞→27B 卸載→720P／10秒單段→兩段接續。若顯存不足，先用 480P／5秒確認環境。不要與原 BANANAMV、BANANAFILM 同時提交 GPU 任務。
+- `bartowski/google_gemma-3-12b-it-GGUF` 的 `google_gemma-3-12b-it-Q5_K_M.gguf`（約 8.44 GB，十進位）
+- `bartowski/google_gemma-3-12b-it-GGUF` 的 `mmproj-google_gemma-3-12b-it-f16.gguf`（約 854 MB）
+- 原本 H3 的六個權重、LoRA 資產及依賴保持不變
 
----
+注意：854 MB 是視覺投影器檔案大小，**不代表 GPU 專用記憶體必須額外常駐這麼多**。12B 仍會閱讀多張 `@圖片`，但視覺投影器預設在 CPU 做影像編碼，讓 5070 專用顯存優先留給語言模型。
 
-# 🍌 Banana MV｜大乘蕉宗公開煉丹房
-
-## Colab 版本辨識
-
-**正式標準公開版：`BANANAMV_CLASSIC_PUBLIC.ipynb`**（本倉庫 `main`）。
-私人自用版用 `BANANAMV_CLASSIC_PRIVATE.ipynb`；實驗版用 `BANANAMV_VNEXT.ipynb`，分屬不同倉庫。原 `Banana_MV_Public.ipynb` 保留，讓舊書籤和已儲存的 Colab 連結不失效。
-
-新任務先一次分配各段故事大綱，再由本地 9B 逐段使用原生 H3 指南產生完整分鏡提示詞。當段只收到自足的拍攝委託、必要素材、本段劇情與音樂資訊，不傳全劇共用設定或未來結局，不重讀全片或前段故事。正常為一次規劃加每段一次導演；稿件保存後供續跑與回爐重用。舊專案保留原流程，實際 9B／H3 品質仍需測試。詳見[導演架構說明](docs/director_architecture.md)。
-
-參考圖片＋原歌曲，在自己的 Google Colab 上生成音樂 MV。支援手機前端、本地 9B 導演、多圖角色分工、分段生成與斷點續跑，還有真的會投藥、開火、出丹的煉丹爐。
-
-圖片1–9欄位預設全部顯示，每格只選一張；清除不會改動其他圖片編號，中間空格需補齊，末尾可留空。接續版最多8張。
-
-[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/haohao1130-bit/banana-mv-public/blob/main/BANANAMV_CLASSIC_PUBLIC.ipynb)
-
-**這是自行運行的實驗工具。** 請使用自己的 Colab GPU 與額度；沒有共用的免費生成伺服器，也不需要付費模型 API。模型下載需要數十 GB 空間，生成時間與效果依 GPU、歌曲長度和設定而變化。
-
-詳細操作見 [操作手冊](docs/user_manual.md)；局部修稿與成片版本見 [丹藥檢查](docs/clip_review.md)。
-
-## 開始使用
-
-1. 開啟上方 Colab，選擇 G4 GPU。依序執行①安裝、②下載模型、③啟動。
-2. 公開倉庫不需要 GitHub Token。Hugging Face 可匿名下載，或在 Colab 左側🔑放入自己的唯讀 `HF_TOKEN`；若上游要求授權，依該模型頁面辦理。
-3. 打開③輸出的前端，上傳主唱參考圖與歌曲，第一次先用 **5 秒音訊** 驗證環境及對嘴。
-4. 選擇導演模式、比例與動作強度，選填想拍的內容，按「開爐煉製 MV」。
-5. 等待各段完成後，播放或下載完整 MV。
-
-這份配置使用 INT8 ConvRot 與 CUDA 13 套件；需要 GPU capability ≥ 8.0、驅動 ≥ 580。①會檢查環境，不符合就停止並提示。G4 是建議配置，Colab 實際分配及可用性仍以當次環境為準。
-
-## 可以做什麼
-
-| 功能 | 行為 |
-| --- | --- |
-| 多圖參考 | 預設顯示固定單圖欄位，獨立分段最多9張、末幀接續最多8張 |
-| 通用角色 | 用 `@圖片1`、`@圖片2` 指定用途，不預設姓名或固定角色；配角可直接用文字描述 |
-| 音樂導向導演 | 以原曲為時間主軸，依強弱、起音、停頓和使用者內容安排演唱、事件與切鏡 |
-| 導演主導 | 勾選全曲規劃後可展開、重排或濃縮故事；仍保留參考身分、演唱分工與明確限制 |
-| 兩種分段模式 | 獨立分段重用參考圖；末幀接續加入上一段最後一幀，不是多幀動作上下文 |
-| 分段與合成 | 每段選10或15秒，尾段按實際剩餘音訊處理；最後混入一次原曲，歌曲最多五分鐘 |
-| 斷點續跑 | 保存專案後重新開啟，沿用素材與設定，續做未完成段落 |
-| 提示詞與 Seed | 查看實際送入 H3 的逐段提示詞、複製，進階設定可填 Seed；留空隨機 |
-| 煉丹實況 | 分析／規劃投藥、生成開火、合成凝丹、完成取丹；動畫代表階段，不是採樣百分比 |
-| 手動關爐 | 筆記本底部只在手動點擊按鈕時關閉 ComfyUI，「全部執行」不會誤關 |
-
-例如：
+## GPU 初始設定（需實機確認）
 
 ```text
-@圖片1 是主唱，負責演唱會表演。
-@圖片2 是拳擊選手，在獨立的地下拳擊場對戰。
-歌曲連續播放，演唱會與拳擊畫面依音樂交錯剪接。
-拳擊選手不演唱。對手與裁判由文字描述生成，不另引用圖片。
+-c 16384 -ngl 99 -fit on -fitt 512 -fa auto -ctk q8_0 -ctv q8_0 -np 1 -t 8 --no-mmproj-offload
 ```
 
-9B 不直接接收音訊 tokens。音樂資訊由本地分析提供，不會自動辨識歌詞、副歌或情緒；節奏數值也是估計。可選填已知歌詞或同時間線的隔離人聲。對嘴、身份一致性與高速動作效果需看片確認。
+- **16K context** 是起始設定：先避免 32K 額外 KV Cache 壓力；不是永久限制。可經 `Data\config.json` 自訂，啟動器保留自訂值。
+- **99 層是全層卸載請求**，但 `-fit on` 在顯存不足時可能減少 GPU 層數；不能保證所有層都在 GPU。
+- **Q8 KV Cache** 以較低記憶體需求換取少量精度／速度折衷；實際速度必須測。
+- **CPU mmproj** 保留多圖能力，避免多張圖片與語言模型同時搶 VRAM；視覺編碼階段可能更慢。
+- 不允許使用 **Windows 共用 GPU RAM** 當作達成目標的必要條件；它經 PCIe 存取通常遠慢於專用 VRAM。
+- 不能保證 45 t/s 以上、固定 10GB 專用 VRAM 或 15–25 秒生成完整 1000+ tokens 提示詞；先看實測值與品質。
 
-## 專案保存與續跑
+**檢查記錄：**
 
-③預設掛載你自己的 Google Drive，專案位於 `MyDrive/BananaMV`；模型快取可在②選擇保存到 `MyDrive/H3_models`。關閉 Drive 保存時，作品留在 Colab 本次執行階段，回收後可能消失。
-
-在前端開啟原專案，按「續跑未完成段落」；已完成的片段保留。不要讓兩個執行階段同時操作同一專案。手機前端的連線重試不代表 GPU 一直可用，Colab 仍可能中斷或回收執行階段。
-
-素材與成片不會由程式提交到此 GitHub 倉庫。安裝／下載會連線 GitHub 與 Hugging Face；生成使用你自己的 Colab GPU。請勿將密鑰、上傳素材、專案資料或個人日誌提交到公開倉庫。
-
-## 遇到問題
-
-- **啟動慢：** ③會等待服務啟動並回報狀態；先看日誌，不用連點重開程序。
-- **生成失敗：** 看生成紀錄的錯誤與階段，保留專案後可續跑。GPU／節點問題需先修復環境。
-- **9B 編出不存在的圖片：** 依設定有限次重試媒體交稿；仍失敗時保留專案，不將錯誤編號改綁其他角色，也不退回完整故事生成。
-- **想關閉 ComfyUI：** 執行底部關閉格只顯示按鈕，手動點擊才停止。生成中的段落可能中斷；重跑③可重新啟動。停止 ComfyUI不會解除GPU配置，結束GPU使用需在Colab中斷並刪除執行階段。
-- **想更新程式：** 先保存作品，再用新的 Colab 執行階段依序執行①②③；已有目錄不會被自動覆寫。
-
-目前有本地單元測試、前端操作測試及模擬 GPU 的 HTTP 流程測試。作者自用版已實測分段 MV 與失敗續跑；公開打包版仍需在新 Colab 執行階段驗證，測試不等於所有 GPU／歌曲皆可成功。
-
-## 開發與授權
-
-```bash
-python -m pip install Pillow numpy ipywidgets
-# 系統需有 ffmpeg、ffprobe；前端測試需 Node.js
-python -m unittest discover -s tests
-node tests/check_ui.cjs
-python tools/build_notebook.py
+```powershell
+Get-Content 'F:\BANANAMV_12B_STUDIO\Logs\gemma12b.log' -Tail 120
+Get-CimInstance Win32_Process | Where-Object Name -eq 'llama-server.exe' | Select-Object ProcessId,CommandLine
+nvidia-smi
 ```
 
-本倉庫自有整合程式採 MIT 授權。ComfyUI、外掛、模型、LoRA、提示詞指南與使用者素材各依自身條款；此授權不取代模型的授權與使用條件。來源見 [THIRD_PARTY.md](THIRD_PARTY.md)。
+想確認哪幾層實際在 GPU，請查看 llama-server 的模型載入診斷或增加 log verbosity；不能只用 GPU 使用率 100% 判定。查看 `tg = XX t/s` 測真實生成速度。
 
-Banana MV is a self-hosted Colab music-video workflow with local prompt rewriting, reference-image roles, music-guided planning and resumable segments. Bring your own GPU allocation and media. Start with a five-second test.
+## 原有流程保留
 
-## 歌詞與 SRT 參考
+Python 仍先處理整首歌曲與分段通告，Gemma 3 12B 只取得當段所需的固定身份、目前事件、SRT 聲部時間與當前連續狀態，不傳送未來劇情。交給 H3 之前會結束 12B llama-server 釋放 GPU 記憶體。原本多圖 S1/S2 身分綁定修正、禁止未登場人物提前入鏡和六欄 H3 提示詞格式保留。
 
-前端的「歌詞與 SRT 參考」提供兩個獨立選填欄位：全曲歌詞供9B理解語意，UTF-8 SRT 可匯入或貼上。SRT 時間碼相對目前上傳的原歌曲起點，按各段時間交集提供；橫跨切點的歌詞會出現在兩段參考中。純歌詞不假定逐行時間，缺少字幕不等於靜音。兩欄任填其一或皆留空都可。
+系統預設在 8193/8217/8218，與舊獨立 27B 使用相同埠。舊版停止後才啟動新版；**沒有升級或覆寫舊 27B 工作目錄**。
 
-開啟9B後，全曲規劃會讀到各段SRT摘要，段落改寫只取得當段重疊的SRT文字與當段委託，不傳全曲歌詞背景。歌詞與時間碼保存在專案設定，開啟／續跑會沿用；既有專案沿用原行為。新版不再把整首歌詞直接附加到H3提示詞，不自動燒字幕，也不改寫原曲。未開啟9B時，不據此另做語意事件規劃。歌詞上限12000字元、SRT上限60000字元；時間碼格式錯誤會在生成前提示修正。
+## 診斷／測試
 
-煉丹介面新增Q版蕉彌與蕉大師：規劃時蕉彌投藥，生成／合成時蕉大師以太極雲手催火，完成後收功。動畫依真實任務狀態啟停，支援減少動態效果；這些是前端裝飾，不加入MV提示詞、角色或參考圖片，也不占用Colab GPU生成動畫。
-
-### 歌詞輸出與成品資料夾
-
-歌詞／SRT 僅供9B理解事件內容與時間位置；音樂分析提供可選卡點，原音訊負責歌曲與演唱同步。9B輸出規則禁止把參考歌詞轉成台詞或強迫畫面角色跟唱；新版 schema 5 只做交稿與媒體引用正規化，沒有額外語意審查；實際提示詞仍需檢查，不能宣稱已用程式清掉所有違規台詞。舊的已保存提示詞不會在續跑時一律重寫，新增規則以重新改寫的段落為準；生成效果仍須看片確認。
-
-完整作品主要在 `MyDrive/BananaMV/banana_mv/工作編號/final.mp4`。每次成功合成另存 `final_v001.mp4`、`final_v002.mp4` 等歷史成片；介面可分別下載。`final.mp4` 保持目前版本，`videos` 僅為可用時另存的副本。舊專案首次回爐先保留原成片，不刪舊版。
-
-## Persistent Scene State V1
-
-新任務不啟用跨段狀態帳本；角色、服裝與道具以各段拍攝大綱交接。舊專案保存的跨段狀態流程仍可續跑，歷史格式見 [工程說明](docs/persistent_scene_state.md)。
-
-### L4 快速測試（480P）
-
-前端「生成解析度」可選 **480P｜L4 快速測試**；預設保留 720P。Colab 請自行選用 L4 GPU，此選項只調整生成尺寸，不會切換 GPU 或改變採樣、對嘴、Face Identity Lock 與分段設定。
-
-| 比例 | 480P 輸出 | 720P 輸出 |
-| --- | --- | --- |
-| 16:9 | 854 × 480 | 1280 × 720 |
-| 9:16 | 480 × 854 | 720 × 1280 |
-| 4:5 | 480 × 600 | 720 × 900 |
-| 1:1 | 480 × 480 | 720 × 720 |
-
-模型以 32 像素對齊尺寸生成，成片裁去對齊補邊，不放大。既有專案續跑使用保存的尺寸；切換解析度請建立新任務。L4 實際速度與顯存需求仍需 GPU 實跑確認。
-
-
-
-
-## Colab 入口整理
-
-本倉庫正式推薦入口為 `BANANAMV_CLASSIC_PUBLIC.ipynb`；原 `Banana_MV_Public.ipynb` 作為相容舊連結的保留入口。舊 T8 攝影政策 A/B 測試已停用，請使用 main 分支。這與正式生成所需的 H3 Audio T8 音訊鎖定節點不同，音訊節點仍保留。
-
-回爐／重拍使用同目錄分段版本檔（例如 `00_raw_v2.mp4`、`00_part_v2.mp4`），先預覽、選好各段版本，再確認凝丹／合成。重拍不自動替換成片。詳見 [版本與回爐說明](docs/clip_review.md)。
-
-### 音樂結構分析
-
-
-前端「音樂結構分析」會先以 All-In-One 的 harmonix-all 模型分析整首原曲，
-輸出 BPM、節拍、小節重拍及主歌／副歌／橋段／Solo 等段落預測。
-資料與既有強弱／起音／停頓一起交給全曲 9B，再換算為各段本地秒數交給攝影提示詞。
-段落標籤可能錯誤，不代表確定的樂器、歌詞或高潮；不以音量直接冒充副歌。
-
-重新執行 Colab 安裝格會建立 `.music-venv`，安裝固定 revision 的
-`openmirlab/all-in-one-infer`，不修改 ComfyUI 的 Python 環境。
-分析使用 CPU 與獨立子程序，首次分析會下載原作者模型；最多 20 分鐘，失敗明確停止，
-詳情保存在專案 `music_structure.log`。原曲不被修改。
-可關閉結構分析保留既有聲學分析做對照；歷史專案不會自動啟用。
-「先搓丹方」可展開段落預測，核准後沿用同一份分析與丹方，不重新分析。
-
-這與 H3 的全參考模式（Omni-reference／Ref2VA）不同：後者讓生成器參考音訊，
-本功能讓上游故事導演取得可檢查的音樂時間資訊，沒有替 9B 加入直接音訊輸入能力。
-來源：https://github.com/mir-aidj/all-in-one 、https://github.com/openmirlab/all-in-one-infer
-
-
-固定角色／圖片與場景設定現在會交接給各段攝影導演；當段狀態可覆蓋初始服裝與道具。未來事件留給負責段落，極短尾段前的完整段落先建立結局。更新後請建立新任務重新搓丹方，舊提示詞不會自動改寫。
-
-選填「音效／短配音軌」支援另行製作的純音效軌，與原曲同起點同長度、空白保留靜音；不應含歌曲本身。系統限制有聲佔比≤25%、單次約≤3秒，降低音效音量後在成片與回爐凝丹時混入。未提供則沿用原曲。此功能不自動產生音效／配音，不辨識搶唱或音效語意，仍需試聽確認。
-
-
-「先搓丹方」新增繁中審閱翻譯與英文原稿切換。英文大綱、角色綁定及下游拍攝輸入保持英文；中文只保存在獨立 `plan_review_zh.json`，不作為生成輸入。翻譯逐段執行，會增加審閱等待時間；圖片／音訊／角色代號與數字需原樣保留。翻譯失敗時仍可檢查英文丹方；翻譯不是語意正確性的保證，可切換英文核對。直接煉丹不做審閱翻譯。舊專案未自動啟用，更新後建立新任務使用。
-
-
-「本次音檔演完完整故事」會要求上游先讀完故事、為結局保留篇幅，再安排起中尾；音樂段落只輔助節奏。由使用者審閱丹方，不增加來源引文擷取、語意審查或開拍阻擋。只有原本必要的交稿格式與媒體引用檢查。故事分配仍需實際檢視，程式不宣稱保證結局完整。
-
-
-原創配角不需要參考圖：當故事要求樂手或其他無圖配角，上游會在共通設定建立固定名稱／職務、外觀、服裝、樂器與站位，再交給當段導演。圖片只鎖定已有參考的角色，不是封閉演員名單；不得把主唱或拳手改派為樂手，也不得捏造圖片編號。跨段外觀仍受生成模型限制，文字設定不等同圖片身分鎖定。
+程式碼靜態回歸測試（不需 GPU）：`python -m unittest tests.test_llama27b tests.test_services tests.test_clip_cast_27b`。在 Windows 本機安裝完成後，先做一段 10 秒、兩張參考圖的測試，確認提示詞、S1/S2 和 H3 交棒，再測四至六張參考圖。當 GPU 專用 VRAM 溢出或速度很慢時，優先檢查模型是否全部卸載、mmproj 是否留 CPU、KV Cache 和圖片數量；不要直接改成 27B 的 `-ngl 999 -fit off`。
