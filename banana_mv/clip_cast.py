@@ -11,14 +11,14 @@ from banana_mv.core import map_image_mentions
 PICTURE = re.compile(r"^\s*<Picture\s+(\d+)>\s*(?:[=:：＝|｜-]\s*)?(.*)$", re.I)
 ROLE = re.compile(r"^\s*\[?\s*(S[12])\s*\]?\s*(?:[=:：＝|｜-]\s*)?(.*)$", re.I)
 TIME = re.compile(r"(?<!\d)(\d{1,2}):(\d\d)\.(\d{1,3})(?!\d)")
-FIRST = re.compile(r"(?:首次|第一次).{0,22}(?:入鏡|登場|出現|露面)|(?:first|initial)\s+(?:appear|entrance|on.screen)|(?:debut)", re.I)
+FIRST = re.compile(r"(?:首次|第一次|初次|首度).{0,22}(?:入鏡|登場|出現|露面|亮相)|(?:first|initial)\s+(?:appear|entrance|on.screen)|(?:debut)", re.I)
 PRESENT_REF = re.compile(r"<Picture\s+(\d+)>", re.I)
 ROLE_REF = re.compile(r"<Subject\s+([12])>|\b(S[12])\b", re.I)
 
 
 def _name(text):
     """Extract only a clearly named identity, not costume or a performance rule."""
-    value = re.split(r"[,，;；(（|｜\n]", text, 1)[0].strip(" \t=：:－-。")
+    value = re.split(r"[,，;；(（|｜／/:：\n]", text, 1)[0].strip(" \t=：:－-。")
     if not value or value.startswith("<") or len(value) > 48:
         return ""
     if re.search(r"\b(?:male|female|adult|sing|lyrics|lead)\b", value, re.I):
@@ -31,6 +31,16 @@ def explicit_bindings(brief, count):
     text = map_image_mentions(str(brief or ""), count)
     direct = role_pictures(text)
     images, names = {}, {}
+    # Authoritative Chinese full-song briefs often write both bindings in one
+    # sentence: "身份交棒：S1＝蕉大師＝@圖片1；S2＝白素貞＝@圖片2".
+    # Resolve EACH role only inside its own semicolon/newline clause.
+    for match in re.finditer(
+        r'(?i)(?<![A-Za-z0-9])(S[12])\s*[=:：＝]\s*[^；;\n]*?<Picture\s+(\d+)>',
+        text,
+    ):
+        role, number = match.group(1).upper(), int(match.group(2))
+        if 1 <= number <= count:
+            direct[role] = f'<Picture {number}>'
     for line in text.splitlines():
         # Original full-song briefs use: S1＝蕉大師＝@圖片1,
         # S2＝白素貞＝@圖片2. The user names in the middle are identity
@@ -45,6 +55,11 @@ def explicit_bindings(brief, count):
                     direct.setdefault(role_line.group(1).upper(), f"<Picture {number}>")
         p = PICTURE.match(line)
         if p and 1 <= int(p[1]) <= count:
+            # "@圖片1 蕉大師／S1：..." is a role-to-image declaration,
+            # even if the character description is long.
+            marked = set(re.findall(r'(?i)(?<![A-Za-z0-9])S[12](?![A-Za-z0-9])', p[2]))
+            if len(marked) == 1:
+                direct.setdefault(next(iter(marked)).upper(), f'<Picture {int(p[1])}>')
             name = _name(p[2])
             if name:
                 images.setdefault(name, set()).add(int(p[1]))
