@@ -5,6 +5,7 @@ import uuid
 from pathlib import Path
 
 from banana_mv.commission_guard import check_commission, role_pictures, wardrobe_for_clip
+from banana_mv.clip_cast import explicit_bindings, clip_visibility
 from banana_mv.core import map_image_mentions, normalize_mv_prompt
 from banana_mv.director import MODES
 from banana_mv.lyrics_reference import SUBJECT_VOCAL_PREFIX, clean_lyric_output, excerpt, vocal_timeline
@@ -577,6 +578,10 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     # Read explicit singer mappings BEFORE stripping global SRT and future-story
     # sections; then forward only canonical, static role/image identities.
     source_singers=role_pictures(fixed_setup)
+    # 27B accepts explicit image/role aliases from the author's original brief
+    # even when the story allocator rewrites SETUP and drops their punctuation.
+    author_singers=explicit_bindings(req.get('prompt',''),len(originals))
+    source_singers.update(author_singers)
     event = _local_event(row['event'])
     vocals = vocal_timeline(excerpt(req, segment))
     context = {'authored_vocal_timeline': vocals, 'ending': clip_ending(req, segment)}
@@ -598,16 +603,27 @@ def write_shoot_prompt(cfg,req,segment,originals,tail,rewrite,progress=None):
     # final H3 sections. 9B owns the number and timing of CAMERA cuts. Never
     # convert an SRT handoff into a compulsory new shot.
     # All other legacy and unscripted routes stay unchanged.
-    if (req.get('director_schema') == 6 and len(originals) == 2
-            and {'S1', 'S2'} <= set(pictures)
-            and req.get('srt_cues')
-            and any(SUBJECT_VOCAL_PREFIX.match(c.get('text',''))
-                    for c in req['srt_cues'])):
+    tagged_dual_srt = (req.get('director_schema') == 6
+                       and len(originals) >= 2
+                       and req.get('srt_cues')
+                       and any(SUBJECT_VOCAL_PREFIX.match(c.get('text',''))
+                               for c in req['srt_cues']))
+    if tagged_dual_srt:
+        # The dedicated Python-owned SRT/camera route is mandatory in the 27B
+        # experiment. Never fall silently to generic native rewriting because
+        # of an extra stage photo or a two-line user cast declaration.
+        if not {'S1', 'S2'} <= set(pictures):
+            raise SceneStateError(
+                '27B 雙人 SRT 缺少明確 S1/S2 對應圖片；請在故事開頭標註'
+                ' @圖片1＝角色名、S1＝角色名，以及 @圖片2／S2。'
+                '禁止退回無角色隔離的一般改寫流程。')
+        access=clip_visibility(event,req.get('prompt',''),segment,pictures,vocals)
         refs = ([tail] if tail else []) + list(originals)
         segment['director_mode'] = row['mode']
         native = write_director_shoot_prompt(
             cfg, req, segment, event, fixed_setup, pictures, wardrobe, refs,
-            _pictures(refs), rewrite, progress)
+            _pictures(refs), rewrite, progress,
+            visibility=access, continuation=bool(tail))
         native, removed = clean_lyric_output(
             native, dict(req, lyrics_reference_version=2))
         segment['lyric_reference_cleanup'] = {'removed_spans': removed}
