@@ -486,7 +486,7 @@ def export_finished_video(job,source,*,refined_version=None,upscaled_version=Non
     configured = os.environ.get('BANANA_FINISHED_VIDEOS')
     if configured:
         folder = Path(configured)
-    elif sys.platform == 'win32' and backend.PORT in (8193, 8195):
+    elif sys.platform == 'win32' and backend.PORT == 8193:
         folder = Path(r'F:\BANANAMV\videos')
     else:
         folder = backend.DATA / 'videos'
@@ -923,7 +923,7 @@ def start(req):
     director_prompt(req, plan[0]['seconds'])
     seed = random.randrange(2**48) if req.get('seed') in (None,'') else int(req['seed'])
     authored_prompt = str(req.get('prompt',''))
-    if req['director_schema'] == 6 and not (backend.PORT in (8193, 8195) and req.get('rewrite', True)):
+    if req['director_schema'] == 6 and not (backend.PORT == 8193 and req.get('rewrite', True)):
         authored_prompt = authored_prompt[:10000]
     req = normalize_references(dict(req, prompt=authored_prompt), seconds)
     # Fail invalid image mentions before queueing any rewrite or GPU work.
@@ -1258,7 +1258,7 @@ class Handler(WebHandler):
             return self.send_json({'service':'banana-mv','standalone':True,'instance':SERVER_INSTANCE,
                                    'version':SERVER_BUILD})
         if url.path=='/api/mv/face-refine-capability':
-            return self.send_json({'local5070':backend.PORT in (8193, 8195)})
+            return self.send_json({'local5070':backend.PORT == 8193})
         if url.path=='/api/mv/restart-capability':
             return self.send_json(restart_capability())
         if url.path=='/api/config':
