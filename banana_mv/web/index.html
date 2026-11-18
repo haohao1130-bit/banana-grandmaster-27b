@@ -275,18 +275,7 @@ $('open-help').onclick=()=>{const dialog=$('help-dialog');if(!dialog.open){dialo
 $('close-help').onclick=()=>$('help-dialog').close();
 $('help-dialog').addEventListener('close',()=>$('open-help').focus());
 $('help-dialog').addEventListener('click',e=>{if(e.target!==$('help-dialog'))return;const r=$('help-dialog').getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)$('help-dialog').close();});
-async function api(url,options){
- let r,raw,data;
- try{r=await fetch(url,options);}catch(cause){
-  const e=Error('無法連線到 27B 服務（'+url+'）：'+cause.message);e.networkIssue=true;throw e;
- }
- try{raw=await r.text();data=JSON.parse(raw);}catch(cause){
-  const e=Error('27B 伺服器回應中斷或不是 JSON（HTTP '+r.status+'，'+url+'）。請檢查服務狀態；建立任務可能已成功，先檢查上次專案，不要重複送出。');
-  e.networkIssue=true;e.status=r.status;throw e;
- }
- if(!r.ok||(data.error&&!data.status)){const e=Error(data.error||r.statusText);e.status=r.status;throw e;}
- return data;
-}
+async function api(url,options){const r=await fetch(url,options);const data=await r.json();if(!r.ok||(data.error&&!data.status)){const e=Error(data.error||r.statusText);e.status=r.status;throw e;}return data;}
 async function updateBuildInfo(){
  const label=$('build-info');
  try{
@@ -578,26 +567,7 @@ $('mode').addEventListener('change',renderImages);renderImages();
 const sizePresets={'720p':{'16:9':[1280,720],'9:16':[720,1280],'4:5':[720,900],'1:1':[720,720]},'480p':{'16:9':[854,480],'9:16':[480,854],'4:5':[480,600],'1:1':[480,480]}};
 function renderSize(){const preset=$('resolution').value||'720p';const [w,h]=sizePresets[preset][$('aspect').value];$('width').value=String(w);$('size-help').textContent=`實際輸出：${w} × ${h} px。${preset==='480p'?'480P 低解析度生成，適合 L4 快速測試；人物細節較少。':'720P 正式製作。'}`;}
 $('aspect').addEventListener('change',renderSize);$('resolution').addEventListener('change',renderSize);renderSize();
-$('form').onsubmit=async e=>{e.preventDefault();let submittedAt=0;const review=e.submitter?.id==='plan-first';mobileJobStatus='preparing';renderRecipe({status:'running'});$('output-location').hidden=true;setFurnace('planning','正在把圖片與歌曲藥材投入爐中。');busy(true);$('progress').max=1;$('progress').value=0;$('progress-label').textContent='整體進度：正在建立任務';$('current-activity').hidden=false;$('activity-text').textContent='正在上傳素材…';promptView.job=null;renderPrompts({id:'pending-upload',segments:[]});renderClipPreviews({id:'pending-upload',segments:[],status:'running'});renderFinalPreviews({});clearTimeout(timer);try{if($('music_structure').checked&&!$('audio_analysis').checked)throw Error('音樂結構分析需要開啟音樂分析引導。');await srtRead;validateImages();$('resume-project').hidden=true;$('project-summary').textContent='';$('job-seed').textContent='本次 Seed：建立任務後顯示';$('audio-summary').textContent='';$('director-summary').textContent='';$('event-plan-details').hidden=true;$('event-plan-text').textContent='';message('正在上傳圖片與歌曲…');const images=[];for(const item of activeImages())images.push(await upload(item.file));const song=await upload($('song').files[0]);const vocal=$('vocal').files[0]?await upload($('vocal').files[0]):null;const effects=$('effects').files[0]?await upload($('effects').files[0]):null;submittedAt=Date.now()/1000;const j=await api('api/mv/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan_review:review,preview_zh:review,project_name:$('project-name').value,image_id:images[0].id,image_ids:images.map(image=>image.id),song_id:song.id,vocal_id:vocal?.id,effects_id:effects?.id,mode:$('mode').value,aspect:$('aspect').value,width:Number($('width').value),segment_seconds:Number($('segment').value),prompt:$('prompt').value,lyrics:$('lyrics').value,srt_reference:$('srt-reference').value,persistent_scene_state:false,rewrite_retries:Number($('rewrite_retries').value),rewrite:$('rewrite').checked,story_plan:$('rewrite').checked,direct_script:!$('rewrite').checked,project_scope:$('project_scope').value,audio_analysis:$('audio_analysis').checked,music_structure:$('music_structure').checked,face_identity:$('face_identity').checked,kitchen_attention:$('kitchen_attention').checked,sparse_attention:$('sparse_attention').checked,face_refine:$('face_refine').checked,upscale_1080p:$('upscale_1080p').checked,face_refine_reference:Number($('face_refine_reference').value),face_refine_reference_2:$('face_refine_reference_2').value ? Number($('face_refine_reference_2').value) : null,motion_lora:$('motion_lora').checked,director:$('director').value,intensity:$('intensity').value,dynamic_cuts:$('dynamic_cuts').checked,seed:$('seed').value})});renderJobSeed(j);active=j.id;localStorage.setItem('banana_mv_job',active);poll();}catch(e){
- if(e.networkIssue){
-  if(submittedAt){
-   try{
-    const rows=await api('api/mv/projects',{cache:'no-store'});
-    const recent=rows.find(row=>Number(row.created)>=submittedAt-2 &&
-      ['running','analyzing_audio','planning_story','checking_environment','plan_ready'].includes(row.status));
-    if(recent){
-     await openProject(recent.id);
-     message('手機連線曾中斷，但找到剛建立的任務 '+recent.id+'，已重新接回；不要重複送單。');
-     return;
-    }
-   }catch(recoveryError){}
-  }
-  setFurnace('reconnecting','任務可能已送達，請先按「開啟上次專案」檢查後再重試。');
-  message(e.message+'\n若已送單，請先按「開啟上次專案」，避免重複建立。');
-  busy(false);return;
- }
- setFurnace('error','任務未能開始，請查看下方錯誤。');message(e.message);busy(false);
-}};
+$('form').onsubmit=async e=>{e.preventDefault();const review=e.submitter?.id==='plan-first';mobileJobStatus='preparing';renderRecipe({status:'running'});$('output-location').hidden=true;setFurnace('planning','正在把圖片與歌曲藥材投入爐中。');busy(true);$('progress').max=1;$('progress').value=0;$('progress-label').textContent='整體進度：正在建立任務';$('current-activity').hidden=false;$('activity-text').textContent='正在上傳素材…';promptView.job=null;renderPrompts({id:'pending-upload',segments:[]});renderClipPreviews({id:'pending-upload',segments:[],status:'running'});renderFinalPreviews({});clearTimeout(timer);try{if($('music_structure').checked&&!$('audio_analysis').checked)throw Error('音樂結構分析需要開啟音樂分析引導。');await srtRead;validateImages();$('resume-project').hidden=true;$('project-summary').textContent='';$('job-seed').textContent='本次 Seed：建立任務後顯示';$('audio-summary').textContent='';$('director-summary').textContent='';$('event-plan-details').hidden=true;$('event-plan-text').textContent='';message('正在上傳圖片與歌曲…');const images=[];for(const item of activeImages())images.push(await upload(item.file));const song=await upload($('song').files[0]);const vocal=$('vocal').files[0]?await upload($('vocal').files[0]):null;const effects=$('effects').files[0]?await upload($('effects').files[0]):null;const j=await api('api/mv/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({plan_review:review,preview_zh:review,project_name:$('project-name').value,image_id:images[0].id,image_ids:images.map(image=>image.id),song_id:song.id,vocal_id:vocal?.id,effects_id:effects?.id,mode:$('mode').value,aspect:$('aspect').value,width:Number($('width').value),segment_seconds:Number($('segment').value),prompt:$('prompt').value,lyrics:$('lyrics').value,srt_reference:$('srt-reference').value,persistent_scene_state:false,rewrite_retries:Number($('rewrite_retries').value),rewrite:$('rewrite').checked,story_plan:$('rewrite').checked,direct_script:!$('rewrite').checked,project_scope:$('project_scope').value,audio_analysis:$('audio_analysis').checked,music_structure:$('music_structure').checked,face_identity:$('face_identity').checked,kitchen_attention:$('kitchen_attention').checked,sparse_attention:$('sparse_attention').checked,face_refine:$('face_refine').checked,upscale_1080p:$('upscale_1080p').checked,face_refine_reference:Number($('face_refine_reference').value),face_refine_reference_2:$('face_refine_reference_2').value ? Number($('face_refine_reference_2').value) : null,motion_lora:$('motion_lora').checked,director:$('director').value,intensity:$('intensity').value,dynamic_cuts:$('dynamic_cuts').checked,seed:$('seed').value})});renderJobSeed(j);active=j.id;localStorage.setItem('banana_mv_job',active);poll();}catch(e){setFurnace('error','任務未能開始，請查看下方錯誤。');message(e.message);busy(false);}};
 $('stop').onclick=async()=>{
  if(!active||$('stop').disabled)return;
  try{
