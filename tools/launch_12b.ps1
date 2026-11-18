@@ -141,7 +141,7 @@ $config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=$inputDir;
              free_after_rewrite=$true;
              rewriter=@{ model=$env:BANANA_12B_MODEL; mmproj=$env:BANANA_12B_MMPROJ;
                          server=$env:BANANA_12B_SERVER; port=8217; gpu_layers=99;
-                         context=16384; max_length=4096; temperature=0.4; top_p=0.8 } }
+                         context=16384; max_length=8192; temperature=0.4; top_p=0.8 } }
 if (Test-Path $configFile) {
     $old = Get-Content -Raw -LiteralPath $configFile | ConvertFrom-Json
     if ($old.rewriter) {
@@ -151,6 +151,10 @@ if (Test-Path $configFile) {
                 $config.rewriter[$key] = $old.rewriter.$key
             }
         }
+    }
+    # Migrate only the old 12B default 4096-token ceiling; preserve other user tuning.
+    if ([int]$config.rewriter.max_length -eq 4096) {
+        $config.rewriter.max_length = 8192
     }
 }
 [System.IO.File]::WriteAllText($configFile, ($config | ConvertTo-Json -Depth 16), (New-Object System.Text.UTF8Encoding($false)))
