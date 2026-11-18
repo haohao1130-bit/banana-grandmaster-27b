@@ -113,7 +113,7 @@ class FreeDirectorShotsTests(unittest.TestCase):
         result = write_director_shoot_prompt(
             self.config, request, seg,
             'The white snake advances towards the temple in the rain.',
-            self.fixed, self.cast, {}, ['snake', 'monk'],
+            self.fixed, self.cast, {}, ['tail', 'monk', 'snake'],
             [], director)
         self.assertEqual(len(calls), 1, 'Missing time metadata must not restart the director')
         self.assertIn('[Shot 2] At 00:05.000', result)
