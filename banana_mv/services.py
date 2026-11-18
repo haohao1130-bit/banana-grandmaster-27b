@@ -27,7 +27,7 @@ DEFAULTS = {
     'free_after_rewrite': True,
     'rewriter': {'model': str(llama27b.DEFAULT_MODEL), 'mmproj': str(llama27b.DEFAULT_MMPROJ),
                  'server': str(llama27b.DEFAULT_SERVER), 'port': 8217,
-                 'gpu_layers': 99, 'context': 16384, 'max_length': 8192,
+                 'gpu_layers': 99, 'context': 16384, 'max_length': 4096,
                  'temperature': 0.4, 'top_p': 0.8},
 }
 
