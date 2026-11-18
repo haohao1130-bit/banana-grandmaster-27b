@@ -223,7 +223,7 @@ try {
     } catch { Write-Warning 'Desktop shortcut failed; use Launch_BANANAMV_27B.cmd' }
     Write-Host '✅ BANANAMV 27B standalone installation ready.'
     Write-Host "Root: $Root"
-    Write-Host 'Frontend: http://127.0.0.1:8195'
+    Write-Host 'Frontend: http://127.0.0.1:8193'
     Write-Host 'Default: 720P / 10 seconds, independent project and model storage'
     & (Join-Path $App 'tools\launch_27b.ps1') -Root $Root
 } finally {
