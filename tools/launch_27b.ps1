@@ -92,7 +92,7 @@ $configFile = Join-Path $data 'config.json'
 $config = @{ comfy_url='http://127.0.0.1:8218'; comfy_input_dir=(Join-Path $comfy 'input');
              free_after_rewrite=$true;
              rewriter=@{ model=$env:BANANA_27B_MODEL; mmproj=$env:BANANA_27B_MMPROJ;
-                         server=$env:BANANA_27B_SERVER; port=8217; gpu_layers='auto';
+                         server=$env:BANANA_27B_SERVER; port=8217; gpu_layers=35;
                          context=32768; max_length=4096; temperature=0.4; top_p=0.8 } }
 if (Test-Path $configFile) {
     $old = Get-Content -Raw -LiteralPath $configFile | ConvertFrom-Json
@@ -103,9 +103,9 @@ if (Test-Path $configFile) {
                 # without overwriting intentional custom values.
                 if ($key -eq 'context' -and [int]$old.rewriter.$key -eq 8192) {
                     $config.rewriter[$key] = 32768
-                } elseif ($key -eq 'gpu_layers' -and [string]$old.rewriter.$key -eq '12') {
-                    # Migrate the original fixed 12-layer default to native auto-fit.
-                    $config.rewriter[$key] = 'auto'
+                } elseif ($key -eq 'gpu_layers' -and [string]$old.rewriter.$key -in @('12', 'auto')) {
+                    # Migrate both legacy 12-layer and unrestricted auto defaults to 35.
+                    $config.rewriter[$key] = 35
                 } else {
                     $config.rewriter[$key] = $old.rewriter.$key
                 }
